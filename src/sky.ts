@@ -114,7 +114,42 @@ export async function imagesFromSia(ra: number, dec: number, fetchImpl: typeof f
   return all.sort((a, b) => a.mjd - b.mjd)
 }
 
-const siaCache = new Map<string, SkyImage[]>()
+export class LruCache<K, V> {
+  private readonly entries = new Map<K, V>()
+
+  constructor(readonly maxEntries: number) {
+    if (!Number.isInteger(maxEntries) || maxEntries < 1) throw new RangeError('maxEntries must be a positive integer')
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+
+  has(key: K): boolean {
+    return this.entries.has(key)
+  }
+
+  get(key: K): V | undefined {
+    if (!this.entries.has(key)) return undefined
+    const value = this.entries.get(key) as V
+    this.entries.delete(key)
+    this.entries.set(key, value)
+    return value
+  }
+
+  set(key: K, value: V): void {
+    this.entries.delete(key)
+    this.entries.set(key, value)
+    while (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next()
+      if (oldest.done) break
+      this.entries.delete(oldest.value)
+    }
+  }
+}
+
+export const SIA_CACHE_MAX = 500
+export const siaCache = new LruCache<string, SkyImage[]>(SIA_CACHE_MAX)
 
 export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch }): Promise<SkyResult> {
   const frag = await imagesFromFragment(indexDir, wave, ra, dec)

@@ -20,7 +20,7 @@ export interface DayState {
   streak: number
 }
 
-export type XpReason = 'ok' | 'too_fast' | 'daily_cap' | 'diminished' | 'repeat'
+export type XpReason = 'ok' | 'too_fast' | 'daily_cap' | 'diminished' | 'repeat' | 'guided'
 
 export interface XpResult {
   xp: number

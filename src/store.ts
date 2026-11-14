@@ -30,6 +30,12 @@ export interface User {
   created_at: number
 }
 
+export type Choice = 'moves' | 'still' | 'unsure'
+
+export const CHOICE_LABEL: Record<Choice, Label> = { moves: 'real', still: 'artifact', unsure: 'unsure' }
+
+const OUTCOME: Record<string, 'open' | 'moves' | 'still' | 'undecided'> = { open: 'open', real: 'moves', artifact: 'still', inconclusive: 'undecided' }
+
 export class HttpError extends Error {
   constructor(readonly statusCode: number, message: string) {
     super(message)
@@ -158,10 +164,29 @@ export class Store {
     return card
   }
 
-  issueCard(userId: string, cardId: string): void {
+  issueCard(userId: string, cardId: string, guided = false): void {
     this.db
-      .prepare('INSERT INTO card_issues (user_id, card_id, issued_at) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET issued_at = excluded.issued_at')
-      .run(userId, cardId, this.now())
+      .prepare('INSERT INTO card_issues (user_id, card_id, issued_at, guided) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET issued_at = excluded.issued_at, guided = excluded.guided')
+      .run(userId, cardId, this.now(), guided ? 1 : 0)
+  }
+
+  guideCard(userId: string): DeckCard | null {
+    const seen = new Set((this.db.prepare('SELECT card_id FROM votes WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id))
+    const jump = (c: DeckCard) => {
+      const [a, b] = c.marks ?? []
+      return a && b ? Math.hypot(a.u - b.u, a.v - b.v) : 0
+    }
+    const pool = this.kit.deck
+      .filter((c) => c.kind === 'mover' && c.gold === 'real' && (c.marks?.length ?? 0) >= 2 && !seen.has(c.id))
+      .sort((a, b) => a.n_frames - b.n_frames || jump(b) - jump(a))
+    const card = pool[0] ?? null
+    if (card) this.issueCard(userId, card.id, true)
+    return card
+  }
+
+  private isGuided(userId: string, cardId: string): boolean {
+    const row = this.db.prepare('SELECT guided FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { guided: number } | undefined
+    return row?.guided === 1
   }
 
   private elapsedSinceIssue(userId: string, cardId: string): number {
@@ -171,26 +196,39 @@ export class Store {
     return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
   }
 
-  vote(userId: string, cardId: string, label: Label) {
+  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null) {
     const card = this.kit.deckById.get(cardId)
     if (!card) throw new HttpError(404, 'unknown_card')
     if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
+    const label = CHOICE_LABEL[choice]
     const ms = this.elapsedSinceIssue(userId, cardId)
-    const xp = this.award(userId, 'vote', cardId, { ms })
-    const counted = xp.reason !== 'too_fast'
-    this.db.prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(userId, cardId, label, ms, counted ? 1 : 0, this.now())
+    const guided = this.isGuided(userId, cardId)
+    const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : this.award(userId, 'vote', cardId, { ms })
+    const counted = !guided && xp.reason !== 'too_fast'
+    this.db
+      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0)
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     let outcome = { gold: card.gold ?? null, correct: null as boolean | null, bits: 0 }
     if (counted) outcome = applyVote(this.swapUsers, this.swapCards, userId, cardId, label)
     else if (card.gold && label !== 'unsure') outcome.correct = label === card.gold
     const newBadges: BadgeKey[] = []
     if (counted && this.grantBadge(userId, 'first_vote')) newBadges.push('first_vote')
-    return { xp, counted, reveal: this.reveal(card, outcome.correct), newBadges }
+    return { xp, counted, guided, reveal: this.reveal(card, outcome.correct, choice), newBadges }
   }
 
-  reveal(card: DeckCard, correct: boolean | null) {
+  setGlitch(userId: string, cardId: string, glitch: boolean | null): void {
+    const r = this.db.prepare('UPDATE votes SET glitch = ? WHERE user_id = ? AND card_id = ?').run(glitch === null ? null : glitch ? 1 : 0, userId, cardId)
+    if (r.changes === 0) throw new HttpError(404, 'no_vote')
+  }
+
+  reveal(card: DeckCard, correct: boolean | null, choice: Choice) {
     const s = this.swapCards.get(card.id) ?? new SwapCard(card.gold ?? null)
+    const looked = (this.db.prepare('SELECT COUNT(DISTINCT user_id) AS n FROM votes WHERE card_id = ?').get(card.id) as { n: number }).n
     return {
+      your_choice: choice,
+      looked,
+      outcome: card.gold ? null : OUTCOME[s.status] ?? 'open',
       kind: card.kind,
       band: card.band.replace('SPHEREx-', ''),
       size_arcmin: card.size_arcmin,

@@ -93,6 +93,8 @@ export const MIGRATIONS: string[] = [
    );
    CREATE INDEX sessions_user ON sessions(user_id);
    INSERT OR IGNORE INTO sessions (token_hash, user_id, created_at) SELECT token_hash, id, created_at FROM users WHERE token_hash != '';`,
+  `ALTER TABLE votes ADD COLUMN glitch INTEGER;
+   ALTER TABLE card_issues ADD COLUMN guided INTEGER NOT NULL DEFAULT 0;`,
 ]
 
 export function openDb(path: string): DB {

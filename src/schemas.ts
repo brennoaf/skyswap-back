@@ -153,16 +153,28 @@ export const DeckCardPublic = Type.Object(
     id: Type.String(),
     sprite: Type.String(),
     n_frames: Type.Integer(),
+    offsets_s: Type.Array(Type.Number()),
   },
   { $id: 'DeckCard' },
 )
 
 export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic) }, { $id: 'NextCardResponse' })
 
-export const VoteBody = Type.Object({ card_id: Type.String({ maxLength: 64 }), label: Type.Union([Type.Literal('real'), Type.Literal('artifact'), Type.Literal('unsure')]) })
+export const VoteBody = Type.Object({
+  card_id: Type.String({ maxLength: 64 }),
+  choice: Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('unsure')]),
+  glitch: Type.Optional(Nullable(Type.Boolean())),
+})
+
+export const GlitchBody = Type.Object({ glitch: Nullable(Type.Boolean()) })
+
+export const GuideResponse = Type.Object({ card: Nullable(DeckCardPublic), marks: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })) }, { $id: 'GuideResponse' })
 
 export const Reveal = Type.Object(
   {
+    your_choice: Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('unsure')]),
+    looked: Type.Integer(),
+    outcome: Nullable(Type.Union([Type.Literal('open'), Type.Literal('moves'), Type.Literal('still'), Type.Literal('undecided')])),
     kind: Type.String(),
     band: Type.String(),
     size_arcmin: Type.Number(),
@@ -182,7 +194,7 @@ export const Reveal = Type.Object(
   { $id: 'Reveal' },
 )
 
-export const VoteResponse = Type.Object({ counted: Type.Boolean(), xp: XpDto, reveal: Reveal, new_badges: Type.Array(Type.String()) }, { $id: 'VoteResponse' })
+export const VoteResponse = Type.Object({ counted: Type.Boolean(), guided: Type.Boolean(), xp: XpDto, reveal: Reveal, new_badges: Type.Array(Type.String()) }, { $id: 'VoteResponse' })
 
 export const TagBody = Type.Object({ tag: Type.Union([Type.Literal('asteroid'), Type.Literal('artifact'), Type.Literal('brightness'), Type.Literal('unsure')]), on: Type.Boolean() })
 

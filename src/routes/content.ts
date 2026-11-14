@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Config } from '../config.js'
 import { objectCard, postDto } from '../dto.js'
-import { angularSeparationDeg, findObjectsByName, propagatePosition, type Kit, type ObjectSummary, type Post } from '../kit.js'
+import { angularSeparationDeg, epochYear, findObjectsByName, propagatePosition, type Kit, type ObjectSummary, type Post } from '../kit.js'
 import { parseCoordinates, resolveName } from '../resolve.js'
 import * as S from '../schemas.js'
 import { imagesAt } from '../sky.js'
@@ -183,7 +183,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
           query: q,
           resolved: true,
           objects: local.map((o) => ({ ...objectCard(o), separation_deg: null })),
-          spot: { name: top.name, ra: at.ra, dec: at.dec, source: 'kit', epoch: Number(top.epoch.replace(/[^0-9.]/g, '')) || null, moved_arcsec: at.shiftArcsec, stale: at.shiftArcsec > STALE_ARCSEC, moving },
+          spot: { name: top.name, ra: at.ra, dec: at.dec, source: 'kit', epoch: epochYear(top.epoch), moved_arcsec: at.shiftArcsec, stale: at.shiftArcsec > STALE_ARCSEC, moving },
         }
       }
       if (!config.online) return { query: q, resolved: false, objects: [], spot: null }

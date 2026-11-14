@@ -29,7 +29,7 @@ export function postDto(p: Post): PostDtoT {
     wavelength_um: p.wavelength_um,
     date_range: p.date_range,
     cover: mediaUrl(p.object_id, p.cover),
-    frames: p.frames.map((f) => ({ ...f, src: mediaUrl(p.object_id, f.src) })),
+    frames: p.frames.map((f) => ({ ...f, src: mediaUrl(p.object_id, f.src), telescope: f.telescope ?? null, n_exp: f.n_exp ?? null })),
     chart: p.chart ? mediaUrl(p.object_id, p.chart) : null,
     marks: p.marks,
     flags_summary: p.flags_summary,

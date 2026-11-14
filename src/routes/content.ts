@@ -105,9 +105,10 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
 
   app.get('/api/stories', { schema: { tags: ['feed'], response: { 200: S.StoriesResponse } } }, async () => ({
     stories: orderedObjects(kit).map((o) => {
-      const post = postsForObject(kit, o.id).find((p) => p.type === 'timelapse' && p.frames.length) ?? postsForObject(kit, o.id).find((p) => p.frames.length)
+      const posts = postsForObject(kit, o.id)
+      const post = posts.find((p) => p.type === 'long_baseline' && p.frames.length) ?? posts.find((p) => p.type === 'timelapse' && p.frames.length) ?? posts.find((p) => p.frames.length)
       const dto = post ? postDto(post) : null
-      return { object: objectCard(o), post_id: post?.id ?? null, frames: (dto?.frames ?? []).map((f) => ({ src: f.src, t: f.t, band: f.band })) }
+      return { object: objectCard(o), post_id: post?.id ?? null, frames: (dto?.frames ?? []).map((f) => ({ src: f.src, t: f.t, band: f.band, telescope: f.telescope })) }
     }),
   }))
 

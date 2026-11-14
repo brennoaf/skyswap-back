@@ -4,7 +4,7 @@ import { normalizeName, repairDeep } from './lib/text.js'
 
 export type Kind = 'star' | 'brown_dwarf' | 'variable' | 'young_star' | 'asteroid' | 'comet' | 'interstellar' | 'candidate'
 export type Verdict = 'clear' | 'with_help' | 'indicative' | 'not_measurable' | 'not_detected'
-export type PostType = 'timelapse' | 'pass_blink' | 'band_compare' | 'difference' | 'composite' | 'spectrum' | 'lightcurve' | 'motion'
+export type PostType = 'timelapse' | 'pass_blink' | 'band_compare' | 'difference' | 'composite' | 'spectrum' | 'lightcurve' | 'motion' | 'long_baseline'
 
 export interface Mags { J: number | null; H: number | null; K: number | null; W1: number | null; W2: number | null }
 
@@ -59,6 +59,8 @@ export interface Frame {
   fov_deg: number
   flags: FrameFlags
   kind: 'exposure' | 'coadd' | 'difference'
+  telescope?: 'WISE' | 'NEOWISE' | 'SPHEREx'
+  n_exp?: number
 }
 
 export interface Post {
@@ -125,6 +127,10 @@ export interface Kit {
   wave: unknown
 }
 
+export function orderPosts(posts: Post[]): Post[] {
+  return [...posts.filter((p) => p.type === 'long_baseline'), ...posts.filter((p) => p.type !== 'long_baseline')]
+}
+
 function readJson<T>(path: string): T {
   return repairDeep(JSON.parse(readFileSync(path, 'utf8')) as T)
 }
@@ -140,7 +146,7 @@ export function loadKit(dataDir: string): Kit {
     const profilePath = join(dir, 'profile.json')
     profiles.set(o.id, existsSync(profilePath) ? { ...o, ...readJson<ObjectProfile>(profilePath) } : (o as ObjectProfile))
     const postsPath = join(dir, 'posts.json')
-    const list = existsSync(postsPath) ? readJson<Omit<Post, 'object_id'>[]>(postsPath).map((p) => ({ ...p, object_id: o.id })) : []
+    const list = orderPosts(existsSync(postsPath) ? readJson<Omit<Post, 'object_id'>[]>(postsPath).map((p) => ({ ...p, object_id: o.id })) : [])
     postsByObject.set(o.id, list)
     posts.push(...list)
   }

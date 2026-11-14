@@ -33,6 +33,8 @@ export const FrameDto = Type.Object(
     fov_deg: Type.Number(),
     kind: Type.String(),
     flags: Type.Object({ saturated_frac: Type.Number(), cosmic_ray: Type.Boolean(), satellite: Type.Boolean(), persistence: Type.Boolean() }),
+    telescope: Nullable(Type.String()),
+    n_exp: Nullable(Type.Integer()),
   },
   { $id: 'Frame' },
 )
@@ -81,7 +83,7 @@ export const Story = Type.Object(
   {
     object: ObjectCard,
     post_id: Nullable(Type.String()),
-    frames: Type.Array(Type.Object({ src: Type.String(), t: Type.String(), band: Type.String() })),
+    frames: Type.Array(Type.Object({ src: Type.String(), t: Type.String(), band: Type.String(), telescope: Nullable(Type.String()) })),
   },
   { $id: 'Story' },
 )

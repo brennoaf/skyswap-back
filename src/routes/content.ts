@@ -19,6 +19,11 @@ export interface RouteCtx {
 
 type FeedTab = 'for_you' | 'following' | 'new' | 'targets'
 const STALE_ARCSEC = 3
+export const CUTOUT_KEY = /^qr[23]\/level2\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\.fits$/
+
+export function isSafeCutoutKey(key: string): boolean {
+  return !key.includes('..') && !key.includes('\\') && !key.includes('//') && CUTOUT_KEY.test(key)
+}
 
 function orderedObjects(kit: Kit): ObjectSummary[] {
   return [...kit.objects].sort((a, b) => Number(b.has_new_data) - Number(a.has_new_data) || Number(b.official_target) - Number(a.official_target) || b.last_seen.localeCompare(a.last_seen))
@@ -230,7 +235,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       schema: {
         tags: ['sky'],
         querystring: Type.Object({
-          key: Type.String({ pattern: '^qr[23]/[A-Za-z0-9_./-]+\\.fits$', maxLength: 200 }),
+          key: Type.String({ pattern: CUTOUT_KEY.source, maxLength: 200 }),
           ra: Type.Number({ minimum: 0, maximum: 360 }),
           dec: Type.Number({ minimum: -90, maximum: 90 }),
           size: Type.Optional(Type.Number({ minimum: 0.01, maximum: 0.25 })),
@@ -239,8 +244,9 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
     },
     async (req, reply) => {
-      if (!config.online) return reply.status(503).send({ error: 'offline' })
       const { key, ra, dec } = req.query
+      if (!isSafeCutoutKey(key)) return reply.status(400).send({ error: 'invalid_key' })
+      if (!config.online) return reply.status(503).send({ error: 'offline' })
       const size = req.query.size ?? 0.1
       const ctrl = new AbortController()
       const timer = setTimeout(() => ctrl.abort(), 30000)

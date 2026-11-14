@@ -157,7 +157,7 @@ export class Store {
     if (counted) outcome = applyVote(this.swapUsers, this.swapCards, userId, cardId, label)
     else if (card.gold && label !== 'unsure') outcome.correct = label === card.gold
     const newBadges: BadgeKey[] = []
-    if (this.grantBadge(userId, 'first_vote')) newBadges.push('first_vote')
+    if (counted && this.grantBadge(userId, 'first_vote')) newBadges.push('first_vote')
     return { xp, counted, reveal: this.reveal(card, outcome.correct), newBadges }
   }
 

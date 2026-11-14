@@ -162,7 +162,7 @@ export const DeckCardPublic = Type.Object(
 
 export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic) }, { $id: 'NextCardResponse' })
 
-export const VoteBody = Type.Object({ card_id: Type.String({ maxLength: 64 }), label: Type.Union([Type.Literal('real'), Type.Literal('artifact'), Type.Literal('unsure')]), ms: Type.Integer({ minimum: 0, maximum: 3600000 }) })
+export const VoteBody = Type.Object({ card_id: Type.String({ maxLength: 64 }), label: Type.Union([Type.Literal('real'), Type.Literal('artifact'), Type.Literal('unsure')]) })
 
 export const Reveal = Type.Object(
   {

@@ -80,6 +80,12 @@ const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL,
      PRIMARY KEY (user_id, alert_id)
    );`,
+  `CREATE TABLE card_issues (
+     user_id TEXT NOT NULL REFERENCES users(id),
+     card_id TEXT NOT NULL,
+     issued_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, card_id)
+   );`,
 ]
 
 export function openDb(path: string): DB {

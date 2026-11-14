@@ -136,16 +136,33 @@ export class Store {
     }
     if (!pool.length) return null
     const id = pool[Math.floor(this.random() * pool.length)] as string
-    return this.kit.deckById.get(id) ?? null
+    const card = this.kit.deckById.get(id) ?? null
+    if (card) this.issueCard(userId, card.id)
+    return card
   }
 
-  vote(userId: string, cardId: string, label: Label, ms: number) {
+  issueCard(userId: string, cardId: string): void {
+    this.db
+      .prepare('INSERT INTO card_issues (user_id, card_id, issued_at) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET issued_at = excluded.issued_at')
+      .run(userId, cardId, this.now())
+  }
+
+  private elapsedSinceIssue(userId: string, cardId: string): number {
+    const issue = this.db.prepare('SELECT issued_at FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { issued_at: number } | undefined
+    if (!issue) throw new HttpError(409, 'card_not_issued')
+    const last = this.db.prepare('SELECT MAX(created_at) AS t FROM votes WHERE user_id = ?').get(userId) as { t: number | null }
+    return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
+  }
+
+  vote(userId: string, cardId: string, label: Label) {
     const card = this.kit.deckById.get(cardId)
     if (!card) throw new HttpError(404, 'unknown_card')
     if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
+    const ms = this.elapsedSinceIssue(userId, cardId)
     const xp = this.award(userId, 'vote', cardId, { ms })
     const counted = xp.reason !== 'too_fast'
     this.db.prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(userId, cardId, label, ms, counted ? 1 : 0, this.now())
+    this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     let outcome = { gold: card.gold ?? null, correct: null as boolean | null, bits: 0 }
     if (counted) outcome = applyVote(this.swapUsers, this.swapCards, userId, cardId, label)
     else if (card.gold && label !== 'unsure') outcome.correct = label === card.gold

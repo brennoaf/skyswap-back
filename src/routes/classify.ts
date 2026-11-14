@@ -27,7 +27,7 @@ export const classifyRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, {
   app.post('/api/classify/votes', { schema: { tags: ['classify'], body: S.VoteBody, response: { 200: S.VoteResponse, 401: S.ErrorBody, 404: S.ErrorBody, 409: S.ErrorBody } }, config: writeLimit }, async (req, reply) => {
     const user = requireUser(req, reply)
     if (!user) return reply
-    const r = store.vote(user.id, req.body.card_id, req.body.label, req.body.ms)
+    const r = store.vote(user.id, req.body.card_id, req.body.label)
     return { counted: r.counted, xp: r.xp, reveal: r.reveal, new_badges: r.newBadges }
   })
 }

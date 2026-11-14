@@ -12,6 +12,7 @@ export function objectCard(o: ObjectSummary): ObjectCardT {
     official_target: o.official_target,
     saturation: o.saturation,
     verdict: o.verdict,
+    best_bands: [...(o.best_bands ?? [])],
     has_new_data: o.has_new_data,
     last_seen: o.last_seen,
   }

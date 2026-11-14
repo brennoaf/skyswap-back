@@ -14,6 +14,7 @@ export const ObjectCard = Type.Object(
     official_target: Type.Boolean(),
     saturation: Type.String(),
     verdict: Type.String(),
+    best_bands: Type.Array(Type.String()),
     has_new_data: Type.Boolean(),
     last_seen: Type.String(),
   },

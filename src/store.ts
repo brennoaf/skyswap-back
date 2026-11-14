@@ -33,6 +33,7 @@ export interface User {
 }
 
 export type Choice = 'moves' | 'still' | 'unsure'
+export type VotePosition = { frame: number; x: number; y: number }
 
 export const CHOICE_LABEL: Record<Choice, Label> = { moves: 'real', still: 'artifact', unsure: 'unsure' }
 
@@ -268,10 +269,11 @@ export class Store {
     return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
   }
 
-  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null) {
+  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null) {
     const card = this.kit.deckById.get(cardId)
     const sky = card ? undefined : this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
+    if (position && (choice !== 'moves' || position.frame >= (card ? card.n_frames : skyVisits((sky as SkyCard).frames).length))) throw new HttpError(400, 'invalid_position')
     if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
     const label = CHOICE_LABEL[choice]
     const ms = this.elapsedSinceIssue(userId, cardId)
@@ -279,8 +281,8 @@ export class Store {
     const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : this.award(userId, 'vote', cardId, { ms })
     const counted = !guided && xp.reason !== 'too_fast'
     this.db
-      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId))
+      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null)
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     const gold = card?.gold ?? null
     let outcome = { gold, correct: null as boolean | null, bits: 0 }

@@ -110,6 +110,7 @@ export const MIGRATIONS: string[] = [
    CREATE INDEX sky_cards_cell ON sky_cards(cell);
    ALTER TABLE votes ADD COLUMN cell INTEGER;
    CREATE INDEX votes_cell ON votes(cell);`,
+  `ALTER TABLE votes ADD COLUMN position TEXT;`,
 ]
 
 export function openDb(path: string): DB {

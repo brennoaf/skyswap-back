@@ -66,15 +66,32 @@ export class Store {
     if (!/^[A-Za-z0-9_.]{3,24}$/.test(clean)) throw new HttpError(400, 'invalid_nickname')
     const exists = this.db.prepare('SELECT 1 FROM users WHERE nickname = ?').get(clean)
     if (exists) throw new HttpError(409, 'nickname_taken')
-    const token = randomBytes(32).toString('hex')
     const user: User = { id: randomUUID(), nickname: clean, created_at: this.now() }
-    this.db.prepare('INSERT INTO users (id, nickname, token_hash, created_at) VALUES (?, ?, ?, ?)').run(user.id, user.nickname, hashToken(token), user.created_at)
+    const token = this.db.transaction(() => {
+      this.db.prepare("INSERT INTO users (id, nickname, token_hash, created_at) VALUES (?, ?, '', ?)").run(user.id, user.nickname, user.created_at)
+      return this.createSession(user.id)
+    })()
     return { user, token }
+  }
+
+  createSession(userId: string): string {
+    const token = randomBytes(32).toString('hex')
+    this.db.prepare('INSERT INTO sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)').run(hashToken(token), userId, this.now())
+    return token
+  }
+
+  endSession(token: string | undefined): void {
+    if (!token) return
+    const hash = hashToken(token)
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hash)
+      this.db.prepare("UPDATE users SET token_hash = '' WHERE token_hash = ?").run(hash)
+    })()
   }
 
   userByToken(token: string | undefined): User | null {
     if (!token) return null
-    const row = this.db.prepare('SELECT id, nickname, created_at FROM users WHERE token_hash = ?').get(hashToken(token)) as User | undefined
+    const row = this.db.prepare('SELECT u.id, u.nickname, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?').get(hashToken(token)) as User | undefined
     return row ? { id: row.id, nickname: row.nickname, created_at: row.created_at } : null
   }
 

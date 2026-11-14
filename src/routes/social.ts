@@ -18,7 +18,8 @@ export const socialRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { s
     return { user }
   })
 
-  app.delete('/api/session', { schema: { tags: ['session'], response: { 200: S.SessionResponse } } }, async (_req, reply) => {
+  app.delete('/api/session', { schema: { tags: ['session'], response: { 200: S.SessionResponse } } }, async (req, reply) => {
+    store.endSession(req.cookies[SESSION_COOKIE])
     reply.clearCookie(SESSION_COOKIE, { path: '/' })
     return { user: null }
   })

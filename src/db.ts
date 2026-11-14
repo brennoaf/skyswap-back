@@ -4,7 +4,7 @@ import { dirname } from 'node:path'
 
 export type DB = Database.Database
 
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `CREATE TABLE users (
      id TEXT PRIMARY KEY,
      nickname TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -86,6 +86,13 @@ const MIGRATIONS: string[] = [
      issued_at INTEGER NOT NULL,
      PRIMARY KEY (user_id, card_id)
    );`,
+  `CREATE TABLE sessions (
+     token_hash TEXT PRIMARY KEY,
+     user_id TEXT NOT NULL REFERENCES users(id),
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX sessions_user ON sessions(user_id);
+   INSERT OR IGNORE INTO sessions (token_hash, user_id, created_at) SELECT token_hash, id, created_at FROM users WHERE token_hash != '';`,
 ]
 
 export function openDb(path: string): DB {

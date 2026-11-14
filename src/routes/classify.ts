@@ -34,7 +34,7 @@ export const classifyRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, {
   })
 
   app.get('/api/explore/cells', { schema: { tags: ['explore'], response: { 200: S.ExploreCellsResponse } } }, async (_req, reply) => {
-    reply.header('cache-control', 'public, max-age=3600')
+    reply.header('cache-control', 'no-cache')
     return { order: EXPLORE_ORDER, cells: kit.indexCells }
   })
 

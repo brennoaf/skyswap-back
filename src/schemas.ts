@@ -361,6 +361,7 @@ export const SkyResponse = Type.Object(
     band: Nullable(Type.String()),
     source: Type.String(),
     cell: Nullable(Type.Integer()),
+    tile_bytes: Nullable(Type.Integer()),
     total: Type.Integer(),
     releases: Type.Array(Type.String()),
     bands: Type.Record(Type.String(), Type.Integer()),

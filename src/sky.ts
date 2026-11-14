@@ -164,7 +164,7 @@ export function totalFileBytes(images: Pick<SkyImage, 'file_size'>[]): number | 
 export const SIA_CACHE_MAX = 500
 export const siaCache = new LruCache<string, SkyImage[]>(SIA_CACHE_MAX)
 
-export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch }): Promise<SkyResult> {
+export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch; afterMjd?: number | null }): Promise<SkyResult> {
   const frag = await imagesFromFragment(indexDir, wave, ra, dec)
   if (frag.images.length) return { source: 'fragment', cell: frag.cell, images: frag.images }
   if (!opts.online) return { source: 'none', cell: frag.cell, images: [] }
@@ -174,5 +174,7 @@ export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec:
     images = await imagesFromSia(ra, dec, opts.fetchImpl)
     siaCache.set(key, images)
   }
-  return { source: images.length ? 'sia' : 'none', cell: frag.cell, images }
+  const after = opts.afterMjd
+  const fresh = after == null ? images : images.filter((i) => i.mjd > after)
+  return { source: fresh.length ? 'sia' : 'none', cell: frag.cell, images: fresh }
 }

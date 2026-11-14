@@ -6,7 +6,7 @@ import fastifyStatic from '@fastify/static'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Config } from './config.js'
@@ -75,12 +75,16 @@ export async function buildApp(deps: AppDeps) {
   const staticOpts = { decorateReply: false, maxAge: 86400 * 1000, immutable: false }
   await app.register(fastifyStatic, { root: join(kit.dataDir, 'objects'), prefix: '/kit/objects/', ...staticOpts })
   if (existsSync(join(kit.dataDir, 'deck', 'media'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'deck', 'media'), prefix: '/kit/deck/', ...staticOpts })
-  if (existsSync(join(kit.dataDir, 'index', 'tiles'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'index', 'tiles'), prefix: '/kit/index/tiles/', ...staticOpts })
+  if (existsSync(join(kit.dataDir, 'index', 'tiles'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'index', 'tiles'), prefix: '/kit/index/tiles/', decorateReply: false, maxAge: 0, etag: true, lastModified: true })
   app.get('/kit/index/wave.json', { schema: { hide: true } }, async (_req, reply) => reply.header('cache-control', 'public, max-age=86400').send(kit.wave))
   const cellsPath = join(kit.dataDir, 'index', 'cells.json')
-  app.get('/kit/index/cells.json', { schema: { hide: true } }, async (_req, reply) => {
+  app.get('/kit/index/cells.json', { schema: { hide: true } }, async (req, reply) => {
     if (!existsSync(cellsPath)) return reply.status(404).send({ error: 'not_found' })
-    return reply.header('cache-control', 'public, max-age=3600').type('application/json').send(await readFile(cellsPath))
+    const st = statSync(cellsPath)
+    const etag = `"${st.size.toString(16)}-${Math.round(st.mtimeMs).toString(16)}"`
+    reply.header('cache-control', 'public, max-age=0, must-revalidate').header('etag', etag)
+    if (req.headers['if-none-match'] === etag) return reply.status(304).send()
+    return reply.type('application/json').send(await readFile(cellsPath))
   })
 
   const cache = deps.cache ?? new DiskCache(config.cacheDir, config.cacheBytes)

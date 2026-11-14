@@ -76,7 +76,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
     objects: kit.objects.length,
     posts: kit.posts.length,
     cards: kit.deck.length,
-    images_indexed: kit.manifest.images_indexed,
+    images_indexed: kit.index.images,
     notes: kit.manifest.notes,
   }))
 
@@ -230,7 +230,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
     const { ra, dec } = req.query
     const fov = req.query.fov ?? 0.1
     const band = req.query.band ?? null
-    const res = await imagesAt(join(kit.dataDir, 'index'), kit.wave, ra, dec, { online: config.online, fetchImpl })
+    const res = await imagesAt(join(kit.dataDir, 'index'), kit.wave, ra, dec, { online: config.online, fetchImpl, afterMjd: kit.index.until_mjd })
     const images = band ? res.images.filter((i) => i.band === band) : res.images
     const bands: Record<string, number> = {}
     for (const i of res.images) bands[i.band] = (bands[i.band] ?? 0) + 1
@@ -241,6 +241,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       band,
       source: res.source,
       cell: res.cell,
+      tile_bytes: res.cell === null ? null : (kit.index.tile_bytes.get(res.cell) ?? null),
       total: images.length,
       releases: [...new Set(images.map((i) => i.release))].sort(),
       bands,

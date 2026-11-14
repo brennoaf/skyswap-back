@@ -18,6 +18,7 @@ import { socialRoutes } from './routes/social.js'
 import { classifyRoutes } from './routes/classify.js'
 
 export const SESSION_COOKIE = 'ss_session'
+export const TRUSTED_PROXY = '127.0.0.1'
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -39,7 +40,7 @@ export async function buildApp(deps: AppDeps) {
   const kit = deps.kit ?? loadKit(config.dataDir)
   const db = deps.db ?? openDb(config.dbPath)
   const store = new Store(db, kit, deps.now, deps.random)
-  const app = Fastify({ logger: false, trustProxy: true }).withTypeProvider<TypeBoxTypeProvider>()
+  const app = Fastify({ logger: false, trustProxy: TRUSTED_PROXY }).withTypeProvider<TypeBoxTypeProvider>()
 
   await app.register(cookie, { secret: config.cookieSecret })
   await app.register(cors, { origin: [config.webOrigin], credentials: true })

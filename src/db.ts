@@ -95,6 +95,21 @@ export const MIGRATIONS: string[] = [
    INSERT OR IGNORE INTO sessions (token_hash, user_id, created_at) SELECT token_hash, id, created_at FROM users WHERE token_hash != '';`,
   `ALTER TABLE votes ADD COLUMN glitch INTEGER;
    ALTER TABLE card_issues ADD COLUMN guided INTEGER NOT NULL DEFAULT 0;`,
+  `CREATE TABLE sky_cards (
+     id TEXT PRIMARY KEY,
+     ra REAL NOT NULL,
+     dec REAL NOT NULL,
+     fov_deg REAL NOT NULL,
+     band TEXT NOT NULL,
+     cell INTEGER NOT NULL,
+     size_px INTEGER NOT NULL,
+     frames TEXT NOT NULL,
+     created_by TEXT,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX sky_cards_cell ON sky_cards(cell);
+   ALTER TABLE votes ADD COLUMN cell INTEGER;
+   CREATE INDEX votes_cell ON votes(cell);`,
 ]
 
 export function openDb(path: string): DB {

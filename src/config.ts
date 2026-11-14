@@ -8,6 +8,8 @@ export interface Config {
   webOrigin: string
   cookieSecret: string
   online: boolean
+  cacheDir: string
+  cacheBytes: number
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -19,5 +21,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webOrigin: env.WEB_ORIGIN ?? 'http://localhost:3000',
     cookieSecret: env.COOKIE_SECRET ?? 'skyswap-local-prototype-secret',
     online: env.SKYSWAP_OFFLINE !== '1',
+    cacheDir: env.SKYSWAP_CACHE_DIR ?? resolve(import.meta.dirname, '..', 'var', 'cutouts'),
+    cacheBytes: Number(env.SKYSWAP_CACHE_MB ?? 512) * 1024 * 1024,
   }
 }

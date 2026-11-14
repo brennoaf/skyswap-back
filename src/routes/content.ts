@@ -8,14 +8,19 @@ import { angularSeparationDeg, epochYear, findObjectsByName, propagatePosition, 
 import { parseCoordinates, resolveName } from '../resolve.js'
 import * as S from '../schemas.js'
 import { imagesAt, totalFileBytes } from '../sky.js'
-import { postsForObject, type Store } from '../store.js'
+import { DiskCache } from '../disk-cache.js'
+import { HttpError, postsForObject, type Store } from '../store.js'
 
 export interface RouteCtx {
   store: Store
   kit: Kit
   config: Config
   fetchImpl: typeof fetch
+  cache: DiskCache
 }
+
+export const S3_BASE = 'https://nasa-irsa-spherex.s3.amazonaws.com/'
+export const S3_MAX_RANGE = 16 * 1024 * 1024
 
 type FeedTab = 'for_you' | 'following' | 'new' | 'targets'
 const STALE_ARCSEC = 3
@@ -48,7 +53,23 @@ function nearby(kit: Kit, ra: number, dec: number, radiusDeg: number, at: string
     .map((x) => ({ ...objectCard(x.o), separation_deg: x.sep }))
 }
 
-export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store, kit, config, fetchImpl }) => {
+export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store, kit, config, fetchImpl, cache }) => {
+  const inflight = new Map<string, Promise<Buffer>>()
+  const cached = async (key: string, load: () => Promise<Buffer>): Promise<{ buf: Buffer; hit: boolean }> => {
+    const hit = await cache.get(key)
+    if (hit) return { buf: hit, hit: true }
+    let p = inflight.get(key)
+    if (!p) {
+      p = load().then(async (buf) => {
+        await cache.put(key, buf)
+        return buf
+      })
+      inflight.set(key, p)
+      p.finally(() => inflight.delete(key)).catch(() => undefined)
+    }
+    return { buf: await p, hit: false }
+  }
+
   app.get('/api/health', { schema: { tags: ['meta'], response: { 200: S.HealthResponse } } }, async () => ({
     ok: true,
     version: kit.manifest.version,
@@ -248,18 +269,63 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       if (!isSafeCutoutKey(key)) return reply.status(400).send({ error: 'invalid_key' })
       if (!config.online) return reply.status(503).send({ error: 'offline' })
       const size = req.query.size ?? 0.1
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 30000)
       try {
-        const r = await fetchImpl(`https://irsa.ipac.caltech.edu/ibe/data/spherex/${key}?center=${ra},${dec}d&size=${size}`, { signal: ctrl.signal })
-        if (!r.ok) return reply.status(502).send({ error: 'irsa_failed' })
-        const buf = Buffer.from(await r.arrayBuffer())
-        return reply.header('content-type', 'application/fits').header('cache-control', 'public, max-age=604800').send(buf)
-      } catch {
+        const { buf, hit } = await cached(DiskCache.keyOf('irsa', key, ra.toFixed(5), dec.toFixed(5), size), async () => {
+          const ctrl = new AbortController()
+          const timer = setTimeout(() => ctrl.abort(), 30000)
+          try {
+            const r = await fetchImpl(`https://irsa.ipac.caltech.edu/ibe/data/spherex/${key}?center=${ra},${dec}d&size=${size}`, { signal: ctrl.signal })
+            if (!r.ok) throw new HttpError(502, 'irsa_failed')
+            return Buffer.from(await r.arrayBuffer())
+          } finally {
+            clearTimeout(timer)
+          }
+        })
+        return reply.header('content-type', 'application/fits').header('cache-control', 'public, max-age=604800').header('x-cache', hit ? 'hit' : 'miss').send(buf)
+      } catch (err) {
+        if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
         return reply.status(504).send({ error: 'irsa_timeout' })
-      } finally {
-        clearTimeout(timer)
       }
     },
   )
+
+  app.get('/api/s3/*', { schema: { hide: true }, config: { rateLimit: { max: 1200, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const key = (req.params as { '*': string })['*']
+    if (!isSafeCutoutKey(key)) return reply.status(400).send({ error: 'invalid_key' })
+    const m = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? '')
+    const start = Number(m?.[1])
+    const end = Number(m?.[2])
+    if (!m || end < start || end - start + 1 > S3_MAX_RANGE) return reply.status(416).send({ error: 'range_required' })
+    const ck = DiskCache.keyOf('s3', key, start, end)
+    const hit = await cache.get(ck)
+    if (!hit && !config.online) return reply.status(503).send({ error: 'offline' })
+    try {
+      const res = hit
+        ? { buf: hit, hit: true }
+        : await cached(ck, async () => {
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 20000)
+            try {
+              const r = await fetchImpl(S3_BASE + key, { headers: { Range: `bytes=${start}-${end}` }, signal: ctrl.signal })
+              if (r.status !== 206) throw new HttpError(502, 's3_failed')
+              const buf = Buffer.from(await r.arrayBuffer())
+              if (buf.length !== end - start + 1) throw new HttpError(502, 's3_short_read')
+              return buf
+            } finally {
+              clearTimeout(timer)
+            }
+          })
+      return reply
+        .status(206)
+        .header('content-type', 'application/octet-stream')
+        .header('content-range', `bytes ${start}-${end}/*`)
+        .header('accept-ranges', 'bytes')
+        .header('cache-control', 'public, max-age=604800, immutable')
+        .header('x-cache', res.hit ? 'hit' : 'miss')
+        .send(res.buf)
+    } catch (err) {
+      if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
+      return reply.status(504).send({ error: 's3_timeout' })
+    }
+  })
 }

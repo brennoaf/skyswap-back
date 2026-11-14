@@ -125,6 +125,7 @@ export interface Kit {
   deck: DeckCard[]
   deckById: Map<string, DeckCard>
   wave: unknown
+  indexCells: number[]
 }
 
 export function orderPosts(posts: Post[]): Post[] {
@@ -153,6 +154,10 @@ export function loadKit(dataDir: string): Kit {
   const deckPath = join(dataDir, 'deck', 'cards.json')
   const deck = existsSync(deckPath) ? readJson<DeckCard[]>(deckPath) : []
   const wavePath = join(dataDir, 'index', 'wave.json')
+  const indexPath = join(dataDir, 'index', 'manifest.json')
+  const indexCells = existsSync(indexPath)
+    ? Object.keys((JSON.parse(readFileSync(indexPath, 'utf8')) as { tiles_index?: Record<string, unknown> }).tiles_index ?? {}).map(Number).filter(Number.isInteger).sort((a, b) => a - b)
+    : []
   return {
     dataDir,
     manifest,
@@ -164,6 +169,7 @@ export function loadKit(dataDir: string): Kit {
     deck,
     deckById: new Map(deck.map((c) => [c.id, c])),
     wave: existsSync(wavePath) ? JSON.parse(readFileSync(wavePath, 'utf8')) : [],
+    indexCells,
   }
 }
 

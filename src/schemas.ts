@@ -160,7 +160,58 @@ export const DeckCardPublic = Type.Object(
   { $id: 'DeckCard' },
 )
 
-export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic) }, { $id: 'NextCardResponse' })
+export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic), sky: Type.Boolean(), interesting: Type.Boolean() }, { $id: 'NextCardResponse' })
+
+export const NextCardQuery = Type.Object({ explore: Type.Optional(Type.Boolean()), known: Type.Optional(Type.Boolean()) })
+
+export const SkyCardBody = Type.Object({
+  ra: Type.Number({ minimum: 0, maximum: 360 }),
+  dec: Type.Number({ minimum: -90, maximum: 90 }),
+  fov_deg: Type.Number({ minimum: 0.05, maximum: 0.2 }),
+  band: Type.String({ pattern: '^D[1-6]$' }),
+  size_px: Type.Integer({ minimum: 8, maximum: 400 }),
+  frames: Type.Array(
+    Type.Object({ key: Type.String({ maxLength: 200 }), mjd: Type.Number({ minimum: 50000, maximum: 80000 }), wl_um: Type.Number({ minimum: 0.5, maximum: 6 }), visit: Type.Optional(Type.Integer({ minimum: 0, maximum: 15 })) }),
+    { minItems: 2, maxItems: 12 },
+  ),
+})
+
+export const SkyCardResponse = Type.Object({ id: Type.String(), ra: Type.Number(), dec: Type.Number(), cell: Type.Integer(), offsets_s: Type.Array(Type.Number()) }, { $id: 'SkyCardResponse' })
+
+export const ExploreCellsResponse = Type.Object({ order: Type.Integer(), cells: Type.Array(Type.Integer()) }, { $id: 'ExploreCellsResponse' })
+
+export const ExploreMapResponse = Type.Object(
+  {
+    order: Type.Integer(),
+    indexed: Type.Integer(),
+    cells: Type.Array(Type.Object({ cell: Type.Integer(), looks: Type.Integer() })),
+    looks: Type.Integer(),
+    people: Type.Integer(),
+    mine: Type.Object({ cells: Type.Integer(), looks: Type.Integer() }),
+  },
+  { $id: 'ExploreMapResponse' },
+)
+
+export const CandidatesResponse = Type.Object(
+  {
+    candidates: Type.Array(
+      Type.Object({
+        id: Type.String(),
+        ra: Type.Number(),
+        dec: Type.Number(),
+        fov_deg: Type.Number(),
+        band: Type.String(),
+        cell: Type.Integer(),
+        p_real: Type.Number(),
+        votes: Type.Object({ real: Type.Integer(), artifact: Type.Integer(), unsure: Type.Integer() }),
+        frames: Type.Array(Type.Object({ key: Type.String(), t: Type.String(), mjd: Type.Number(), wl_um: Type.Number(), visit: Type.Integer() })),
+        status: Type.String(),
+        catalog_check: Type.Null(),
+      }),
+    ),
+  },
+  { $id: 'CandidatesResponse' },
+)
 
 export const VoteBody = Type.Object({
   card_id: Type.String({ maxLength: 64 }),

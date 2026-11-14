@@ -7,9 +7,11 @@ import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Config } from './config.js'
 import { openDb, type DB } from './db.js'
+import { DiskCache } from './disk-cache.js'
 import { loadKit, type Kit } from './kit.js'
 import { HttpError, Store, type User } from './store.js'
 import * as S from './schemas.js'
@@ -33,6 +35,7 @@ export interface AppDeps {
   now?: () => number
   random?: () => number
   fetchImpl?: typeof fetch
+  cache?: DiskCache
 }
 
 export async function buildApp(deps: AppDeps) {
@@ -74,14 +77,20 @@ export async function buildApp(deps: AppDeps) {
   if (existsSync(join(kit.dataDir, 'deck', 'media'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'deck', 'media'), prefix: '/kit/deck/', ...staticOpts })
   if (existsSync(join(kit.dataDir, 'index', 'tiles'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'index', 'tiles'), prefix: '/kit/index/tiles/', ...staticOpts })
   app.get('/kit/index/wave.json', { schema: { hide: true } }, async (_req, reply) => reply.header('cache-control', 'public, max-age=86400').send(kit.wave))
+  const cellsPath = join(kit.dataDir, 'index', 'cells.json')
+  app.get('/kit/index/cells.json', { schema: { hide: true } }, async (_req, reply) => {
+    if (!existsSync(cellsPath)) return reply.status(404).send({ error: 'not_found' })
+    return reply.header('cache-control', 'public, max-age=3600').type('application/json').send(await readFile(cellsPath))
+  })
 
-  const ctx = { store, kit, config, fetchImpl: deps.fetchImpl ?? fetch }
+  const cache = deps.cache ?? new DiskCache(config.cacheDir, config.cacheBytes)
+  const ctx = { store, kit, config, fetchImpl: deps.fetchImpl ?? fetch, cache }
   await app.register(contentRoutes, ctx)
   await app.register(socialRoutes, ctx)
   await app.register(classifyRoutes, ctx)
 
   await app.ready()
-  return { app, store, kit, db }
+  return { app, store, kit, db, cache }
 }
 
 export function requireUser(req: FastifyRequest, reply: FastifyReply): User | null {

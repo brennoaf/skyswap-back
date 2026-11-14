@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DB } from './db.js'
+import { EXPLORE_ORDER, mjdIso, QUIET_STREAK, skyCardId, skyVisits, WARMUP_CARDS, WARMUP_KNOWN_SHARE, type SkyCard, type SkyFrame } from './explore.js'
+import { ang2pixNest } from './healpix.js'
 import type { DeckCard, Kit, ObjectSummary, Post } from './kit.js'
 import { applyVote, goldRate, SwapCard, SwapUser, type Label } from './swap.js'
 import {
@@ -50,10 +52,53 @@ export class Store {
   private swapUsers = new Map<string, SwapUser>()
   private swapCards = new Map<string, SwapCard>()
   private objectsById: Map<string, ObjectSummary>
+  private skyCards = new Map<string, SkyCard>()
+  private deckCells = new Map<string, number>()
 
   constructor(readonly db: DB, readonly kit: Kit, private readonly now: () => number = Date.now, private readonly random: () => number = Math.random) {
     this.objectsById = new Map(kit.objects.map((o) => [o.id, o]))
+    for (const c of kit.deck) this.deckCells.set(c.id, ang2pixNest(EXPLORE_ORDER, c.ra, c.dec))
+    this.loadSkyCards()
+    this.backfillCells()
     this.rebuildSwap()
+  }
+
+  private loadSkyCards(): void {
+    const rows = this.db.prepare('SELECT id, ra, dec, fov_deg, band, cell, size_px, frames, created_at FROM sky_cards').all() as (Omit<SkyCard, 'frames'> & { frames: string })[]
+    for (const r of rows) this.skyCards.set(r.id, { ...r, frames: JSON.parse(r.frames) as SkyFrame[] })
+  }
+
+  private backfillCells(): void {
+    const upd = this.db.prepare('UPDATE votes SET cell = ? WHERE card_id = ? AND cell IS NULL')
+    this.db.transaction(() => {
+      for (const [id, cell] of this.deckCells) upd.run(cell, id)
+    })()
+  }
+
+  skyCard(id: string): SkyCard | undefined {
+    return this.skyCards.get(id)
+  }
+
+  cellOf(cardId: string): number | null {
+    return this.deckCells.get(cardId) ?? this.skyCards.get(cardId)?.cell ?? null
+  }
+
+  registerSkyCard(userId: string, input: { ra: number; dec: number; fov_deg: number; band: string; size_px: number; frames: SkyFrame[] }): SkyCard {
+    const ra = Math.round((((input.ra % 360) + 360) % 360) * 1e4) / 1e4
+    const dec = Math.round(input.dec * 1e4) / 1e4
+    const id = skyCardId(ra, dec, input.fov_deg, input.band)
+    let card = this.skyCards.get(id)
+    if (!card) {
+      const frames = [...input.frames].sort((a, b) => a.mjd - b.mjd)
+      card = { id, ra, dec, fov_deg: input.fov_deg, band: input.band, cell: ang2pixNest(EXPLORE_ORDER, ra, dec), size_px: input.size_px, frames, created_at: this.now() }
+      this.db
+        .prepare('INSERT OR IGNORE INTO sky_cards (id, ra, dec, fov_deg, band, cell, size_px, frames, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, ra, dec, card.fov_deg, card.band, card.cell, card.size_px, JSON.stringify(frames), userId, card.created_at)
+      this.skyCards.set(id, card)
+      this.swapCards.set(id, new SwapCard(null))
+    }
+    if (!this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, id)) this.issueCard(userId, id)
+    return card
   }
 
   object(id: string): ObjectSummary | undefined {
@@ -63,6 +108,7 @@ export class Store {
   rebuildSwap(): void {
     this.swapUsers = new Map()
     this.swapCards = new Map(this.kit.deck.map((c) => [c.id, new SwapCard(c.gold ?? null)]))
+    for (const id of this.skyCards.keys()) this.swapCards.set(id, new SwapCard(null))
     const rows = this.db.prepare('SELECT user_id, card_id, label FROM votes WHERE counted = 1 ORDER BY id').all() as { user_id: string; card_id: string; label: Label }[]
     for (const r of rows) if (this.swapCards.has(r.card_id)) applyVote(this.swapUsers, this.swapCards, r.user_id, r.card_id, r.label)
   }
@@ -140,17 +186,43 @@ export class Store {
     return r.xp
   }
 
-  nextCard(userId: string): DeckCard | null {
+  private quietStreak(userId: string): boolean {
+    const last = this.db.prepare('SELECT card_id, label FROM votes WHERE user_id = ? ORDER BY id DESC LIMIT ?').all(userId, QUIET_STREAK) as { card_id: string; label: string }[]
+    return last.length === QUIET_STREAK && last.every((v) => this.skyCards.has(v.card_id) && v.label === 'artifact')
+  }
+
+  next(userId: string, opts: { explore?: boolean; known?: boolean } = {}): { card: DeckCard | null; sky: boolean; interesting: boolean } {
     const seen = new Set((this.db.prepare('SELECT card_id FROM votes WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id))
+    if (opts.explore && this.quietStreak(userId)) {
+      const mover = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id))
+      const pick = mover[Math.floor(this.random() * mover.length)]
+      if (pick) {
+        this.issueCard(userId, pick.id)
+        return { card: pick, sky: false, interesting: true }
+      }
+    }
+    const canExplore = !!opts.explore && !opts.known && this.kit.indexCells.length > 0
+    if (canExplore) {
+      const n = seen.size
+      const knownShare = n < WARMUP_CARDS ? WARMUP_KNOWN_SHARE : goldRate(n)
+      if (this.random() >= knownShare) return { card: null, sky: true, interesting: false }
+    }
+    const card = this.nextCard(userId, { controlsOnly: canExplore && seen.size >= WARMUP_CARDS, seen })
+    if (!card && canExplore) return { card: null, sky: true, interesting: false }
+    return { card, sky: false, interesting: false }
+  }
+
+  nextCard(userId: string, opts: { controlsOnly?: boolean; seen?: Set<string> } = {}): DeckCard | null {
+    const seen = opts.seen ?? new Set((this.db.prepare('SELECT card_id FROM votes WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id))
     const n = seen.size
     const gold: string[] = []
     const open: string[] = []
     for (const [id, c] of this.swapCards) {
-      if (seen.has(id)) continue
+      if (seen.has(id) || !this.kit.deckById.has(id)) continue
       if (c.gold) gold.push(id)
       else if (c.status === 'open') open.push(id)
     }
-    const wantGold = this.random() < goldRate(n)
+    const wantGold = opts.controlsOnly || this.random() < goldRate(n)
     let pool: string[]
     if ((wantGold && gold.length) || !open.length) pool = gold
     else {
@@ -198,7 +270,8 @@ export class Store {
 
   vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null) {
     const card = this.kit.deckById.get(cardId)
-    if (!card) throw new HttpError(404, 'unknown_card')
+    const sky = card ? undefined : this.skyCards.get(cardId)
+    if (!card && !sky) throw new HttpError(404, 'unknown_card')
     if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
     const label = CHOICE_LABEL[choice]
     const ms = this.elapsedSinceIssue(userId, cardId)
@@ -206,15 +279,85 @@ export class Store {
     const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : this.award(userId, 'vote', cardId, { ms })
     const counted = !guided && xp.reason !== 'too_fast'
     this.db
-      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0)
+      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId))
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
-    let outcome = { gold: card.gold ?? null, correct: null as boolean | null, bits: 0 }
+    const gold = card?.gold ?? null
+    let outcome = { gold, correct: null as boolean | null, bits: 0 }
     if (counted) outcome = applyVote(this.swapUsers, this.swapCards, userId, cardId, label)
-    else if (card.gold && label !== 'unsure') outcome.correct = label === card.gold
+    else if (gold && label !== 'unsure') outcome.correct = label === gold
     const newBadges: BadgeKey[] = []
     if (counted && this.grantBadge(userId, 'first_vote')) newBadges.push('first_vote')
-    return { xp, counted, guided, reveal: this.reveal(card, outcome.correct, choice), newBadges }
+    const reveal = card ? this.reveal(card, outcome.correct, choice) : this.skyReveal(sky as SkyCard, choice)
+    return { xp, counted, guided, reveal, newBadges }
+  }
+
+  skyStatus(id: string): string {
+    const s = this.swapCards.get(id)
+    if (!s) return 'open'
+    return s.status === 'real' ? 'candidate' : s.status
+  }
+
+  skyReveal(card: SkyCard, choice: Choice) {
+    const s = this.swapCards.get(card.id) ?? new SwapCard(null)
+    const looked = (this.db.prepare('SELECT COUNT(DISTINCT user_id) AS n FROM votes WHERE card_id = ?').get(card.id) as { n: number }).n
+    return {
+      your_choice: choice,
+      looked,
+      outcome: OUTCOME[s.status] ?? 'open',
+      kind: 'sky',
+      band: card.band,
+      size_arcmin: Math.round(card.fov_deg * 60 * 100) / 100,
+      tile: card.size_px,
+      size_px: card.size_px,
+      frames: skyVisits(card.frames).map((v) => ({ t: mjdIso(v.mjd), mjd: Math.round(v.mjd * 1e6) / 1e6, n_exp: v.n_exp, wl_min: v.wl_min, wl_max: v.wl_max })),
+      known: null,
+      rate_arcsec_h: null,
+      ra: card.ra,
+      dec: card.dec,
+      marks: [],
+      control: null,
+      p_real: Math.round(s.pReal * 1000) / 1000,
+      votes: { real: s.nReal, artifact: s.nArt, unsure: s.nUnsure },
+      status: this.skyStatus(card.id),
+    }
+  }
+
+  candidates(limit = 100) {
+    const out = []
+    for (const card of this.skyCards.values()) {
+      const s = this.swapCards.get(card.id)
+      if (!s || s.status !== 'real') continue
+      out.push({
+        id: card.id,
+        ra: card.ra,
+        dec: card.dec,
+        fov_deg: card.fov_deg,
+        band: card.band,
+        cell: card.cell,
+        p_real: Math.round(s.pReal * 1000) / 1000,
+        votes: { real: s.nReal, artifact: s.nArt, unsure: s.nUnsure },
+        frames: card.frames.map((f, i) => ({ key: f.key, t: mjdIso(f.mjd), mjd: f.mjd, wl_um: f.wl_um, visit: f.visit ?? i })),
+        status: 'candidate',
+        catalog_check: null,
+      })
+    }
+    return out.sort((a, b) => b.p_real - a.p_real).slice(0, limit)
+  }
+
+  exploreMap(userId: string | null) {
+    const rows = this.db.prepare('SELECT cell, COUNT(*) AS n FROM votes WHERE cell IS NOT NULL GROUP BY cell').all() as { cell: number; n: number }[]
+    const people = (this.db.prepare('SELECT COUNT(DISTINCT user_id) AS n FROM votes WHERE cell IS NOT NULL').get() as { n: number }).n
+    const mine = userId ? (this.db.prepare('SELECT COUNT(DISTINCT cell) AS n FROM votes WHERE user_id = ? AND cell IS NOT NULL').get(userId) as { n: number }).n : 0
+    const myLooks = userId ? (this.db.prepare('SELECT COUNT(*) AS n FROM votes WHERE user_id = ? AND cell IS NOT NULL').get(userId) as { n: number }).n : 0
+    return {
+      order: EXPLORE_ORDER,
+      indexed: this.kit.indexCells.length,
+      cells: rows.map((r) => ({ cell: r.cell, looks: r.n })),
+      looks: rows.reduce((a, r) => a + r.n, 0),
+      people,
+      mine: { cells: mine, looks: myLooks },
+    }
   }
 
   setGlitch(userId: string, cardId: string, glitch: boolean | null): void {
@@ -390,9 +533,10 @@ export class Store {
     }[]
     const tags = this.db.prepare('SELECT post_id AS ref, tag AS detail, created_at FROM tags WHERE user_id = ? ORDER BY created_at DESC LIMIT ?').all(userId, limit) as { ref: string; detail: string; created_at: number }[]
     const items = [
-      ...votes.filter((v) => this.kit.deckById.has(v.ref)).map((v) => {
+      ...votes.filter((v) => this.kit.deckById.has(v.ref) || this.skyCards.has(v.ref)).map((v) => {
         const s = this.swapCards.get(v.ref)
-        return { type: 'vote' as const, ref: v.ref, detail: v.detail, created_at: v.created_at, status: s && !s.gold ? s.status : null, post: null }
+        const status = this.skyCards.has(v.ref) ? this.skyStatus(v.ref) : s && !s.gold ? s.status : null
+        return { type: 'vote' as const, ref: v.ref, detail: v.detail, created_at: v.created_at, status, post: null }
       }),
       ...marks.filter((m) => this.kit.postsById.has(m.ref)).map((m) => ({ type: 'mark' as const, ref: m.ref, detail: String(m.detail), created_at: m.created_at, status: null, post: this.postBrief(m.ref) })),
       ...tags.filter((t) => this.kit.postsById.has(t.ref)).map((t) => ({ type: 'tag' as const, ref: t.ref, detail: t.detail, created_at: t.created_at, status: null, post: this.postBrief(t.ref) })),
@@ -407,7 +551,7 @@ export class Store {
 
   alerts(userId: string) {
     const read = new Set((this.db.prepare('SELECT alert_id FROM alerts_read WHERE user_id = ?').all(userId) as { alert_id: string }[]).map((r) => r.alert_id))
-    const out: { id: string; type: 'new_data' | 'consensus' | 'badge' | 'level' | 'goal'; ref: string; detail: string; created_at: number; read: boolean }[] = []
+    const out: { id: string; type: 'new_data' | 'consensus' | 'candidate' | 'badge' | 'level' | 'goal'; ref: string; detail: string; created_at: number; read: boolean }[] = []
     const follows = this.db.prepare('SELECT object_id, created_at FROM follows WHERE user_id = ?').all(userId) as { object_id: string; created_at: number }[]
     for (const f of follows) {
       const o = this.objectsById.get(f.object_id)
@@ -416,7 +560,9 @@ export class Store {
     const votes = this.db.prepare('SELECT card_id, label, created_at FROM votes WHERE user_id = ? AND counted = 1').all(userId) as { card_id: string; label: string; created_at: number }[]
     for (const v of votes) {
       const s = this.swapCards.get(v.card_id)
-      if (s && !s.gold && s.status !== 'open') out.push({ id: `consensus:${v.card_id}:${s.status}`, type: 'consensus', ref: v.card_id, detail: s.status, created_at: v.created_at, read: false })
+      if (s && this.skyCards.has(v.card_id)) {
+        if (s.status === 'real') out.push({ id: `candidate:${v.card_id}`, type: 'candidate', ref: v.card_id, detail: `${this.skyCards.get(v.card_id)?.ra ?? 0},${this.skyCards.get(v.card_id)?.dec ?? 0}`, created_at: v.created_at, read: false })
+      } else if (s && !s.gold && s.status !== 'open') out.push({ id: `consensus:${v.card_id}:${s.status}`, type: 'consensus', ref: v.card_id, detail: s.status, created_at: v.created_at, read: false })
     }
     const badges = this.db.prepare('SELECT badge, created_at FROM badges WHERE user_id = ?').all(userId) as { badge: string; created_at: number }[]
     for (const b of badges) out.push({ id: `badge:${b.badge}`, type: 'badge', ref: b.badge, detail: b.badge, created_at: b.created_at, read: false })

@@ -352,12 +352,12 @@ export class Store {
     }[]
     const tags = this.db.prepare('SELECT post_id AS ref, tag AS detail, created_at FROM tags WHERE user_id = ? ORDER BY created_at DESC LIMIT ?').all(userId, limit) as { ref: string; detail: string; created_at: number }[]
     const items = [
-      ...votes.map((v) => {
+      ...votes.filter((v) => this.kit.deckById.has(v.ref)).map((v) => {
         const s = this.swapCards.get(v.ref)
         return { type: 'vote' as const, ref: v.ref, detail: v.detail, created_at: v.created_at, status: s && !s.gold ? s.status : null, post: null }
       }),
-      ...marks.map((m) => ({ type: 'mark' as const, ref: m.ref, detail: String(m.detail), created_at: m.created_at, status: null, post: this.postBrief(m.ref) })),
-      ...tags.map((t) => ({ type: 'tag' as const, ref: t.ref, detail: t.detail, created_at: t.created_at, status: null, post: this.postBrief(t.ref) })),
+      ...marks.filter((m) => this.kit.postsById.has(m.ref)).map((m) => ({ type: 'mark' as const, ref: m.ref, detail: String(m.detail), created_at: m.created_at, status: null, post: this.postBrief(m.ref) })),
+      ...tags.filter((t) => this.kit.postsById.has(t.ref)).map((t) => ({ type: 'tag' as const, ref: t.ref, detail: t.detail, created_at: t.created_at, status: null, post: this.postBrief(t.ref) })),
     ]
     return items.sort((a, b) => b.created_at - a.created_at).slice(0, limit)
   }

@@ -1,6 +1,4 @@
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { epochsAtTile as epochsAtTileJs } from './vendor/spherex.js'
+import { lookupPoint } from './index-lookup.js'
 
 export interface SkyImage {
   key: string
@@ -34,24 +32,14 @@ interface TileHit {
   file_size?: number | null
 }
 
-type EpochsAtTile = (base: string, wave: unknown, ra: number, dec: number, opts: { order: number; fetchImpl: (url: string) => Promise<Response> }) => Promise<{ cell: number; hits: TileHit[] }>
-const epochsAtTile = epochsAtTileJs as unknown as EpochsAtTile
 
 export function mjdToIso(mjd: number): string {
   return new Date((mjd - 40587) * 86400000).toISOString()
 }
 
 export async function imagesFromFragment(indexDir: string, wave: unknown, ra: number, dec: number): Promise<{ cell: number; images: SkyImage[] }> {
-  const local = async (url: string): Promise<Response> => {
-    const rel = url.replace(/^fragment:\/\//, '')
-    try {
-      return new Response(await readFile(join(indexDir, rel)))
-    } catch {
-      return new Response(null, { status: 404 })
-    }
-  }
-  const q = await epochsAtTile('fragment://', wave, ra, dec, { order: 5, fetchImpl: local })
-  const images = q.hits
+  const q = await lookupPoint(indexDir, wave, ra, dec)
+  const images = (q.hits as unknown as TileHit[])
     .filter((h) => !h.dqa || h.dqa === 'Pass')
     .map((h) => ({
       key: h.key,

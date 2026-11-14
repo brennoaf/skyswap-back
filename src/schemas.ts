@@ -178,7 +178,7 @@ export const SkyCardBody = Type.Object({
 
 export const SkyCardResponse = Type.Object({ id: Type.String(), ra: Type.Number(), dec: Type.Number(), cell: Type.Integer(), offsets_s: Type.Array(Type.Number()) }, { $id: 'SkyCardResponse' })
 
-export const ExploreCellsResponse = Type.Object({ order: Type.Integer(), cells: Type.Array(Type.Integer()) }, { $id: 'ExploreCellsResponse' })
+export const ExploreCellsResponse = Type.Object({ order: Type.Integer(), cells: Type.Array(Type.Integer()), bytes: Type.Array(Type.Integer()) }, { $id: 'ExploreCellsResponse' })
 
 export const ExploreMapResponse = Type.Object(
   {
@@ -383,6 +383,11 @@ export const SkyResponse = Type.Object(
     total_file_bytes: Nullable(Type.Integer()),
   },
   { $id: 'SkyResponse' },
+)
+
+export const IndexAtResponse = Type.Object(
+  { cell: Type.Integer(), total: Type.Integer(), sampled: Type.Boolean(), rows: Type.Array(Type.Object({}, { additionalProperties: true })) },
+  { $id: 'IndexAtResponse' },
 )
 
 export const HealthResponse = Type.Object(

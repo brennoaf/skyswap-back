@@ -9,6 +9,7 @@ import { parseCoordinates, resolveName } from '../resolve.js'
 import * as S from '../schemas.js'
 import { imagesAt, totalFileBytes } from '../sky.js'
 import { DiskCache } from '../disk-cache.js'
+import { lookupPoint, sampleRows } from '../index-lookup.js'
 import { HttpError, postsForObject, type Store } from '../store.js'
 
 export interface RouteCtx {
@@ -250,6 +251,30 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       total_file_bytes: totalFileBytes(images),
     }
   })
+
+  app.get(
+    '/api/index/at',
+    {
+      schema: {
+        tags: ['sky'],
+        querystring: Type.Object({
+          ra: Type.Number({ minimum: 0, maximum: 360 }),
+          dec: Type.Number({ minimum: -90, maximum: 90 }),
+          band: Type.Optional(Type.String({ pattern: '^D[1-6]$' })),
+          t1: Type.Optional(Type.Number()),
+          t2: Type.Optional(Type.Number()),
+          max: Type.Optional(Type.Integer({ minimum: 2, maximum: 2000 })),
+        }),
+        response: { 200: S.IndexAtResponse },
+      },
+    },
+    async (req) => {
+      const { ra, dec, band, t1, t2 } = req.query
+      const q = await lookupPoint(join(kit.dataDir, 'index'), kit.wave, ra, dec, { band, t1, t2 })
+      const rows = sampleRows(q.hits, req.query.max ?? 400)
+      return { cell: q.cell, total: q.hits.length, sampled: rows.length < q.hits.length, rows }
+    },
+  )
 
   app.get(
     '/api/cutout',

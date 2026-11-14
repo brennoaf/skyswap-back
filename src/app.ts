@@ -50,6 +50,7 @@ export async function buildApp(deps: AppDeps) {
       info: { title: 'SkySwap API', version: '0.1.0', description: 'Sky objects from real NASA SPHEREx images, served from the SkySwap data kit.' },
       components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: SESSION_COOKIE } } },
     },
+    refResolver: { buildLocalReference: (json, _baseUri, _fragment, i) => (typeof json.$id === 'string' ? json.$id : `def-${i}`) },
   })
   await app.register(swaggerUi, { routePrefix: '/docs' })
 

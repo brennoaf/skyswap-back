@@ -7,7 +7,7 @@ import { objectCard, postDto } from '../dto.js'
 import { angularSeparationDeg, epochYear, findObjectsByName, propagatePosition, type Kit, type ObjectSummary, type Post } from '../kit.js'
 import { parseCoordinates, resolveName } from '../resolve.js'
 import * as S from '../schemas.js'
-import { imagesAt } from '../sky.js'
+import { imagesAt, totalFileBytes } from '../sky.js'
 import { postsForObject, type Store } from '../store.js'
 
 export interface RouteCtx {
@@ -212,7 +212,6 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
     const images = band ? res.images.filter((i) => i.band === band) : res.images
     const bands: Record<string, number> = {}
     for (const i of res.images) bands[i.band] = (bands[i.band] ?? 0) + 1
-    const used = Math.min(48, images.length)
     return {
       ra,
       dec,
@@ -225,7 +224,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       bands,
       images: images.slice(0, 2000),
       nearby: nearby(kit, ra, dec, Math.max(0.25, fov), new Date().toISOString()),
-      estimated_bytes: Math.round(used * 1.3e6 * Math.max(1, (fov / 0.1) ** 2)),
+      total_file_bytes: totalFileBytes(images),
     }
   })
 

@@ -309,10 +309,11 @@ export const SkyResponse = Type.Object(
         lam_min: Type.Number(),
         lam_max: Type.Number(),
         obs_id: Nullable(Type.String()),
+        file_size: Nullable(Type.Integer()),
       }),
     ),
     nearby: Type.Array(Type.Intersect([ObjectCard, Type.Object({ separation_deg: Nullable(Type.Number()) })])),
-    estimated_bytes: Type.Integer(),
+    total_file_bytes: Nullable(Type.Integer()),
   },
   { $id: 'SkyResponse' },
 )

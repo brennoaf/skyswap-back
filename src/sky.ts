@@ -12,6 +12,7 @@ export interface SkyImage {
   lam_min: number
   lam_max: number
   obs_id: string | null
+  file_size: number | null
 }
 
 export interface SkyResult {
@@ -30,6 +31,7 @@ interface TileHit {
   lam_max: number
   obsid?: string
   dqa?: string
+  file_size?: number | null
 }
 
 type EpochsAtTile = (base: string, wave: unknown, ra: number, dec: number, opts: { order: number; fetchImpl: (url: string) => Promise<Response> }) => Promise<{ cell: number; hits: TileHit[] }>
@@ -61,6 +63,7 @@ export async function imagesFromFragment(indexDir: string, wave: unknown, ra: nu
       lam_min: h.lam_min,
       lam_max: h.lam_max,
       obs_id: h.obsid ?? null,
+      file_size: typeof h.file_size === 'number' && Number.isFinite(h.file_size) && h.file_size > 0 ? h.file_size : null,
     }))
   return { cell: q.cell, images }
 }
@@ -102,6 +105,7 @@ export async function imagesFromSia(ra: number, dec: number, fetchImpl: typeof f
             lam_min: Number(row.em_min) * 1e6,
             lam_max: Number(row.em_max) * 1e6,
             obs_id: row.obs_id ?? null,
+            file_size: null,
           })
         }
       } catch {
@@ -146,6 +150,15 @@ export class LruCache<K, V> {
       this.entries.delete(oldest.value)
     }
   }
+}
+
+export function totalFileBytes(images: Pick<SkyImage, 'file_size'>[]): number | null {
+  let total = 0
+  for (const i of images) {
+    if (i.file_size == null) return null
+    total += i.file_size
+  }
+  return total
 }
 
 export const SIA_CACHE_MAX = 500

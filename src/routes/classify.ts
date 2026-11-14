@@ -8,9 +8,7 @@ export function publicCard(c: DeckCard) {
   return {
     id: c.id,
     sprite: `/kit/deck/${c.sprite.split('/').pop() ?? ''}`,
-    tile: c.tile,
     n_frames: c.n_frames,
-    frames: c.frames.map((f) => ({ t: f.t, mjd: f.mjd, n_exp: f.n_exp })),
   }
 }
 

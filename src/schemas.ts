@@ -152,9 +152,7 @@ export const DeckCardPublic = Type.Object(
   {
     id: Type.String(),
     sprite: Type.String(),
-    tile: Type.Integer(),
     n_frames: Type.Integer(),
-    frames: Type.Array(Type.Object({ t: Type.String(), mjd: Type.Number(), n_exp: Type.Integer() })),
   },
   { $id: 'DeckCard' },
 )
@@ -168,7 +166,9 @@ export const Reveal = Type.Object(
     kind: Type.String(),
     band: Type.String(),
     size_arcmin: Type.Number(),
-    frames: Type.Array(Type.Object({ t: Type.String(), wl_min: Type.Number(), wl_max: Type.Number() })),
+    tile: Type.Integer(),
+    size_px: Type.Integer(),
+    frames: Type.Array(Type.Object({ t: Type.String(), mjd: Type.Number(), n_exp: Type.Integer(), wl_min: Type.Number(), wl_max: Type.Number() })),
     known: Nullable(Type.Object({ name: Type.String(), V: Nullable(Type.Number()), rate_arcsec_h: Nullable(Type.Number()) })),
     rate_arcsec_h: Nullable(Type.Number()),
     ra: Type.Number(),

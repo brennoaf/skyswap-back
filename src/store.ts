@@ -175,6 +175,9 @@ export class Store {
     const s = this.swapCards.get(card.id) ?? new SwapCard(card.gold ?? null)
     return {
       kind: card.kind,
+      band: card.band.replace('SPHEREx-', ''),
+      size_arcmin: card.size_arcmin,
+      frames: card.frames.map((f) => ({ t: f.t, wl_min: f.wl_min, wl_max: f.wl_max })),
       known: card.known ? { name: card.known.name, V: card.known.V ?? null, rate_arcsec_h: card.known.rate_arcsec_h ?? null } : null,
       rate_arcsec_h: card.rate_arcsec_h ?? null,
       ra: card.ra,

@@ -10,9 +10,7 @@ export function publicCard(c: DeckCard) {
     sprite: `/kit/deck/${c.sprite.split('/').pop() ?? ''}`,
     tile: c.tile,
     n_frames: c.n_frames,
-    band: c.band.replace('SPHEREx-', ''),
-    size_arcmin: c.size_arcmin,
-    frames: c.frames.map((f) => ({ t: f.t, mjd: f.mjd, wl_min: f.wl_min, wl_max: f.wl_max, n_exp: f.n_exp })),
+    frames: c.frames.map((f) => ({ t: f.t, mjd: f.mjd, n_exp: f.n_exp })),
   }
 }
 

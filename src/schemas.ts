@@ -153,9 +153,7 @@ export const DeckCardPublic = Type.Object(
     sprite: Type.String(),
     tile: Type.Integer(),
     n_frames: Type.Integer(),
-    band: Type.String(),
-    size_arcmin: Type.Number(),
-    frames: Type.Array(Type.Object({ t: Type.String(), mjd: Type.Number(), wl_min: Type.Number(), wl_max: Type.Number(), n_exp: Type.Integer() })),
+    frames: Type.Array(Type.Object({ t: Type.String(), mjd: Type.Number(), n_exp: Type.Integer() })),
   },
   { $id: 'DeckCard' },
 )
@@ -167,6 +165,9 @@ export const VoteBody = Type.Object({ card_id: Type.String({ maxLength: 64 }), l
 export const Reveal = Type.Object(
   {
     kind: Type.String(),
+    band: Type.String(),
+    size_arcmin: Type.Number(),
+    frames: Type.Array(Type.Object({ t: Type.String(), wl_min: Type.Number(), wl_max: Type.Number() })),
     known: Nullable(Type.Object({ name: Type.String(), V: Nullable(Type.Number()), rate_arcsec_h: Nullable(Type.Number()) })),
     rate_arcsec_h: Nullable(Type.Number()),
     ra: Type.Number(),

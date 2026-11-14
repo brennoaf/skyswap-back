@@ -5,13 +5,13 @@ import { applyVote, goldRate, SwapCard, SwapUser, type Label } from './swap.js'
 import {
   BADGES,
   COMMUNITY_GOALS,
+  DAILY_CAP,
   dayKey,
   isInfraredOnly,
   levelFor,
   LEVELS,
   sawAllColours,
   scoreAction,
-  unlockedTools,
   type BadgeKey,
   type DayState,
   type XpAction,
@@ -27,7 +27,6 @@ export type LearningEvent = (typeof LEARNING_EVENTS)[number]
 export interface User {
   id: string
   nickname: string
-  expert: boolean
   created_at: number
 }
 
@@ -68,21 +67,15 @@ export class Store {
     const exists = this.db.prepare('SELECT 1 FROM users WHERE nickname = ?').get(clean)
     if (exists) throw new HttpError(409, 'nickname_taken')
     const token = randomBytes(32).toString('hex')
-    const user: User = { id: randomUUID(), nickname: clean, expert: false, created_at: this.now() }
-    this.db.prepare('INSERT INTO users (id, nickname, token_hash, expert, created_at) VALUES (?, ?, ?, 0, ?)').run(user.id, user.nickname, hashToken(token), user.created_at)
+    const user: User = { id: randomUUID(), nickname: clean, created_at: this.now() }
+    this.db.prepare('INSERT INTO users (id, nickname, token_hash, created_at) VALUES (?, ?, ?, ?)').run(user.id, user.nickname, hashToken(token), user.created_at)
     return { user, token }
   }
 
   userByToken(token: string | undefined): User | null {
     if (!token) return null
-    const row = this.db.prepare('SELECT id, nickname, expert, created_at FROM users WHERE token_hash = ?').get(hashToken(token)) as
-      | { id: string; nickname: string; expert: number; created_at: number }
-      | undefined
-    return row ? { ...row, expert: row.expert === 1 } : null
-  }
-
-  setExpert(userId: string, expert: boolean): void {
-    this.db.prepare('UPDATE users SET expert = ? WHERE id = ?').run(expert ? 1 : 0, userId)
+    const row = this.db.prepare('SELECT id, nickname, created_at FROM users WHERE token_hash = ?').get(hashToken(token)) as User | undefined
+    return row ? { id: row.id, nickname: row.nickname, created_at: row.created_at } : null
   }
 
   private dayState(userId: string): DayState {
@@ -294,13 +287,13 @@ export class Store {
     const count = (sql: string) => (this.db.prepare(sql).get(user.id) as { n: number }).n
     const streak = st.lastActiveDay === st.day || (st.lastActiveDay && Date.parse(st.day) - Date.parse(st.lastActiveDay) <= 86400000) ? st.streak : 0
     return {
-      user: { id: user.id, nickname: user.nickname, expert: user.expert, created_at: user.created_at },
+      user: { id: user.id, nickname: user.nickname, created_at: user.created_at },
       xp,
       xp_today: st.xpToday,
+      daily_cap: DAILY_CAP,
       streak,
       level: { level: lvl.current.level, key: lvl.current.key, min_xp: lvl.current.minXp, next_min_xp: lvl.next?.minXp ?? null, progress: lvl.progress },
       levels: LEVELS.map((l) => ({ level: l.level, key: l.key, min_xp: l.minXp })),
-      tools: unlockedTools(lvl.current.level, user.expert),
       badges: BADGES.map((b) => ({ key: b, earned_at: badges.find((x) => x.badge === b)?.created_at ?? null })),
       counts: {
         votes: count('SELECT COUNT(*) AS n FROM votes WHERE user_id = ?'),

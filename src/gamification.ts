@@ -82,30 +82,12 @@ export const LEVELS: Level[] = [
   { level: 6, key: 'researcher', minXp: 800 },
 ]
 
-export type LabTool = 'fov' | 'gaia' | 'wise' | 'flags' | 'pixels' | 'spectrum' | 'lightcurve' | 'notes' | 'export'
-
-export const LAB_UNLOCKS: Record<LabTool, number> = {
-  fov: 1,
-  gaia: 1,
-  wise: 2,
-  flags: 2,
-  pixels: 3,
-  spectrum: 4,
-  lightcurve: 4,
-  notes: 5,
-  export: 6,
-}
-
 export function levelFor(xp: number): { current: Level; next: Level | null; progress: number } {
   let current = LEVELS[0] as Level
   for (const l of LEVELS) if (xp >= l.minXp) current = l
   const next = LEVELS.find((l) => l.level === current.level + 1) ?? null
   const progress = next ? (xp - current.minXp) / (next.minXp - current.minXp) : 1
   return { current, next, progress: Math.max(0, Math.min(1, progress)) }
-}
-
-export function unlockedTools(level: number, expert: boolean): LabTool[] {
-  return (Object.keys(LAB_UNLOCKS) as LabTool[]).filter((t) => expert || LAB_UNLOCKS[t] <= level)
 }
 
 export type BadgeKey = 'first_vote' | 'all_colours' | 'first_spectrum' | 'infrared_only' | 'first_motion' | 'too_bright' | 'week_streak'

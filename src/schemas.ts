@@ -141,7 +141,7 @@ export const PostDetail = Type.Object(
 
 export const XpDto = Type.Object({ xp: Type.Integer(), streakBonus: Type.Integer(), streak: Type.Integer(), reason: Type.String() }, { $id: 'Xp' })
 
-export const UserDto = Type.Object({ id: Type.String(), nickname: Type.String(), expert: Type.Boolean(), created_at: Type.Number() }, { $id: 'User' })
+export const UserDto = Type.Object({ id: Type.String(), nickname: Type.String(), created_at: Type.Number() }, { $id: 'User' })
 
 export const SessionResponse = Type.Object({ user: Nullable(UserDto) }, { $id: 'SessionResponse' })
 
@@ -212,10 +212,10 @@ export const MeResponse = Type.Object(
     user: UserDto,
     xp: Type.Integer(),
     xp_today: Type.Integer(),
+    daily_cap: Type.Integer(),
     streak: Type.Integer(),
     level: Type.Object({ level: Type.Integer(), key: Type.String(), min_xp: Type.Integer(), next_min_xp: Nullable(Type.Integer()), progress: Type.Number() }),
     levels: Type.Array(Type.Object({ level: Type.Integer(), key: Type.String(), min_xp: Type.Integer() })),
-    tools: Type.Array(Type.String()),
     badges: Type.Array(Type.Object({ key: Type.String(), earned_at: Nullable(Type.Number()) })),
     counts: Type.Object({ votes: Type.Integer(), marks: Type.Integer(), tags: Type.Integer(), following: Type.Integer() }),
     following: Type.Array(ObjectCard),
@@ -232,8 +232,6 @@ export const MeResponse = Type.Object(
   },
   { $id: 'MeResponse' },
 )
-
-export const MePatch = Type.Object({ expert: Type.Boolean() })
 
 export const AlertsResponse = Type.Object(
   {

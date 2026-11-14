@@ -78,13 +78,6 @@ export const socialRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { s
     return meBody(user)
   })
 
-  app.patch('/api/me', { schema: { tags: ['me'], body: S.MePatch, response: { 200: S.MeResponse, 401: S.ErrorBody } }, config: writeLimit }, async (req, reply) => {
-    const user = requireUser(req, reply)
-    if (!user) return reply
-    store.setExpert(user.id, req.body.expert)
-    return meBody({ ...user, expert: req.body.expert })
-  })
-
   app.get('/api/alerts', { schema: { tags: ['alerts'], response: { 200: S.AlertsResponse, 401: S.ErrorBody } } }, async (req, reply) => {
     const user = requireUser(req, reply)
     if (!user) return reply

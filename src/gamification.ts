@@ -119,8 +119,17 @@ export function sawAllColours(seen: Iterable<string>): boolean {
   return BANDS.every((b) => s.has(b))
 }
 
-export function isInfraredOnly(bestBands: string[], verdict: string): boolean {
-  return verdict !== 'not_detected' && bestBands.length > 0 && bestBands.every((b) => b === 'D5' || b === 'D6')
+export const DETECTION_SNR = 8
+export const SHORT_BAND_LIMIT_SNR = 10
+
+export type BandStats = Record<string, { snr_pass?: number | null }>
+
+export function isInfraredOnly(bandStats: BandStats | undefined, verdict: string): boolean {
+  if (!bandStats || verdict === 'not_detected') return false
+  const snr = (b: string) => bandStats[b]?.snr_pass ?? -Infinity
+  const long = Math.max(snr('D5'), snr('D6'))
+  const short = Math.max(snr('D1'), snr('D2'), snr('D3'), snr('D4'))
+  return long >= DETECTION_SNR && short < SHORT_BAND_LIMIT_SNR
 }
 
 export interface CommunityGoal {

@@ -44,6 +44,7 @@ export interface ObjectProfile extends ObjectSummary {
   measurements: { motion?: string; lightcurve?: string; spectra?: string }
   limits: string[]
   field: { fov_deg: number; ra: number | null; dec: number | null }
+  band_stats?: Record<string, { snr_pass?: number | null; found_frac?: number | null }>
 }
 
 export interface FrameFlags { saturated_frac: number; cosmic_ray: boolean; satellite: boolean; persistence: boolean }

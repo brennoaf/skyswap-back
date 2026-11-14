@@ -280,7 +280,7 @@ export class Store {
     if (event === 'spectrum_opened' && this.grantBadge(userId, 'first_spectrum')) earned.push('first_spectrum')
     if (event === 'object_viewed') {
       const o = this.objectsById.get(ref)
-      if (o && isInfraredOnly(o.best_bands, o.verdict) && this.grantBadge(userId, 'infrared_only')) earned.push('infrared_only')
+      if (o && isInfraredOnly(this.kit.profiles.get(o.id)?.band_stats, o.verdict) && this.grantBadge(userId, 'infrared_only')) earned.push('infrared_only')
       if (o && o.saturation === 'heavy' && this.grantBadge(userId, 'too_bright')) earned.push('too_bright')
     }
     return earned

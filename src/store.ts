@@ -175,10 +175,10 @@ export class Store {
     return result
   }
 
-  grantBadge(userId: string, badge: BadgeKey): boolean {
+  grantBadge(userId: string, badge: BadgeKey, withXp = true): boolean {
     const r = this.db.prepare('INSERT OR IGNORE INTO badges (user_id, badge, created_at) VALUES (?, ?, ?)').run(userId, badge, this.now())
     if (r.changes === 0) return false
-    this.award(userId, 'badge', badge)
+    if (withXp) this.award(userId, 'badge', badge)
     return true
   }
 
@@ -490,13 +490,13 @@ export class Store {
     this.db.prepare('INSERT OR IGNORE INTO learning (user_id, event, ref, created_at) VALUES (?, ?, ?, ?)').run(userId, event, ref, this.now())
     if (event === 'band_seen') {
       const seen = (this.db.prepare("SELECT ref FROM learning WHERE user_id = ? AND event = 'band_seen'").all(userId) as { ref: string }[]).map((r) => r.ref)
-      if (sawAllColours(seen) && this.grantBadge(userId, 'all_colours')) earned.push('all_colours')
+      if (sawAllColours(seen) && this.grantBadge(userId, 'all_colours', false)) earned.push('all_colours')
     }
-    if (event === 'spectrum_opened' && this.grantBadge(userId, 'first_spectrum')) earned.push('first_spectrum')
+    if (event === 'spectrum_opened' && this.grantBadge(userId, 'first_spectrum', false)) earned.push('first_spectrum')
     if (event === 'object_viewed') {
       const o = this.objectsById.get(ref)
-      if (o && isInfraredOnly(this.kit.profiles.get(o.id)?.band_stats, o.verdict) && this.grantBadge(userId, 'infrared_only')) earned.push('infrared_only')
-      if (o && o.saturation === 'heavy' && this.grantBadge(userId, 'too_bright')) earned.push('too_bright')
+      if (o && isInfraredOnly(this.kit.profiles.get(o.id)?.band_stats, o.verdict) && this.grantBadge(userId, 'infrared_only', false)) earned.push('infrared_only')
+      if (o && o.saturation === 'heavy' && this.grantBadge(userId, 'too_bright', false)) earned.push('too_bright')
     }
     return earned
   }
@@ -518,7 +518,7 @@ export class Store {
       levels: LEVELS.map((l) => ({ level: l.level, key: l.key, min_xp: l.minXp })),
       badges: BADGES.map((b) => ({ key: b, earned_at: badges.find((x) => x.badge === b)?.created_at ?? null })),
       counts: {
-        votes: count('SELECT COUNT(*) AS n FROM votes WHERE user_id = ?'),
+        votes: count('SELECT COUNT(*) AS n FROM votes WHERE user_id = ? AND counted = 1'),
         marks: count('SELECT COUNT(DISTINCT post_id) AS n FROM marks WHERE user_id = ?'),
         tags: count('SELECT COUNT(*) AS n FROM tags WHERE user_id = ?'),
         following: count('SELECT COUNT(*) AS n FROM follows WHERE user_id = ?'),
@@ -527,7 +527,7 @@ export class Store {
   }
 
   history(userId: string, limit = 50) {
-    const votes = this.db.prepare('SELECT card_id AS ref, label AS detail, created_at FROM votes WHERE user_id = ? ORDER BY id DESC LIMIT ?').all(userId, limit) as { ref: string; detail: string; created_at: number }[]
+    const votes = this.db.prepare('SELECT card_id AS ref, label AS detail, created_at FROM votes WHERE user_id = ? AND counted = 1 ORDER BY id DESC LIMIT ?').all(userId, limit) as { ref: string; detail: string; created_at: number }[]
     const marks = this.db.prepare('SELECT post_id AS ref, COUNT(*) AS detail, MAX(created_at) AS created_at FROM marks WHERE user_id = ? GROUP BY post_id ORDER BY created_at DESC LIMIT ?').all(userId, limit) as {
       ref: string
       detail: number

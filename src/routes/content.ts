@@ -46,6 +46,13 @@ export function cropFlags(span: Uint8Array, nrows: number, skip: number, h: numb
 type FeedTab = 'for_you' | 'following' | 'new' | 'targets'
 const STALE_ARCSEC = 3
 const STORY_FINDS = 3
+export const HIPS_BASE = 'https://irsa.ipac.caltech.edu/data/hips/CDS/'
+export const HIPS_SURVEYS: Record<string, { path: string; maxOrder: number }> = {
+  wise: { path: 'AllWISE/W2', maxOrder: 8 },
+  '2mass-j': { path: '2MASS/J', maxOrder: 9 },
+  '2mass-h': { path: '2MASS/H', maxOrder: 9 },
+  '2mass-k': { path: '2MASS/K', maxOrder: 9 },
+}
 export const CUTOUT_KEY = /^(qr[23]|dr1)\/level2\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\.fits$/
 
 export function isSafeCutoutKey(key: string): boolean {
@@ -439,6 +446,40 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       } catch (err) {
         if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
         return reply.status(504).send({ error: 's3_timeout' })
+      }
+    },
+  )
+
+  app.get(
+    '/api/hips/:survey/:order/:npix',
+    {
+      schema: { hide: true, params: Type.Object({ survey: Type.String({ maxLength: 12 }), order: Type.Integer({ minimum: 0, maximum: 9 }), npix: Type.Integer({ minimum: 0 }) }) },
+      config: { rateLimit: { max: 1200, timeWindow: '1 minute' } },
+    },
+    async (req, reply) => {
+      const { survey, order, npix } = req.params
+      const s = HIPS_SURVEYS[survey]
+      if (!s || order > s.maxOrder || npix >= 12 * 4 ** order) return reply.status(400).send({ error: 'invalid_tile' })
+      const ck = DiskCache.keyOf('hips', survey, order, npix)
+      const hit = await cache.get(ck)
+      if (!hit && !config.online) return reply.status(503).send({ error: 'offline' })
+      try {
+        const buf = hit ?? (await cached(ck, async () => {
+          const ctrl = new AbortController()
+          const timer = setTimeout(() => ctrl.abort(), 20000)
+          try {
+            const r = await fetchImpl(`${HIPS_BASE}${s.path}/Norder${order}/Dir${Math.floor(npix / 10000) * 10000}/Npix${npix}.jpg`, { signal: ctrl.signal })
+            if (r.status === 404) throw new HttpError(404, 'no_tile')
+            if (!r.ok) throw new HttpError(502, 'hips_failed')
+            return Buffer.from(await r.arrayBuffer())
+          } finally {
+            clearTimeout(timer)
+          }
+        })).buf
+        return reply.header('content-type', 'image/jpeg').header('cache-control', 'public, max-age=2592000, immutable').header('x-cache', hit ? 'hit' : 'miss').send(buf)
+      } catch (err) {
+        if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
+        return reply.status(504).send({ error: 'hips_timeout' })
       }
     },
   )

@@ -32,7 +32,7 @@ const OUTCOME: Record<string, 'open' | 'moves' | 'still' | 'undecided'> = { open
 type Gold = 'real' | 'artifact'
 
 const MY_CARDS_PAGE = 30
-const CLOCK_SLACK_MS = 300_000
+const CLOCK_SLACK_MS = 120_000
 
 type VoteTiming = { heldMs?: number; thinkMs?: number; answeredAt?: number }
 
@@ -349,6 +349,7 @@ export class Deck extends StorePart {
   issueCard(userId: string, cardId: string, guided = false, shared = false): void {
     this.q('INSERT INTO card_issues (user_id, card_id, issued_at, guided, shared) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET issued_at = excluded.issued_at, guided = MAX(card_issues.guided, excluded.guided), shared = excluded.shared')
       .run(userId, cardId, this.now(), guided ? 1 : 0, shared ? 1 : 0)
+    this.q('INSERT OR IGNORE INTO card_firsts (user_id, card_id, first_at) VALUES (?, ?, ?)').run(userId, cardId, this.now())
   }
 
   sharedCard(userId: string, cardId: string): { card: DeckCard; answered: 'moves' | 'still' | 'glitch' | 'unsure' | null } | null {
@@ -416,10 +417,14 @@ export class Deck extends StorePart {
       return { ms: elapsed - heldMs, heldMs, answeredAt: null }
     }
     if (!this.q('SELECT 1 FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'card_not_issued')
-    const answeredAt = Math.min(meta.answeredAt, this.now() + CLOCK_SLACK_MS)
-    const before = this.q('SELECT MAX(answered_at) AS t FROM votes WHERE user_id = ? AND answered_at < ?').get(userId, answeredAt) as { t: number | null }
-    const gap = before.t === null ? Infinity : answeredAt - before.t
-    return { ms: Math.max(0, Math.min(meta.thinkMs, gap)), heldMs: Math.max(0, meta.heldMs ?? 0), answeredAt }
+    const heldMs = Math.max(0, meta.heldMs ?? 0)
+    const answeredAt = meta.answeredAt
+    const first = this.q('SELECT first_at FROM card_firsts WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { first_at: number } | undefined
+    const last = this.q('SELECT MAX(answered_at) AS t FROM votes WHERE user_id = ?').get(userId) as { t: number | null }
+    const fits = answeredAt <= this.now() + CLOCK_SLACK_MS && (!first || answeredAt - meta.thinkMs >= first.first_at - CLOCK_SLACK_MS) && (last.t === null || answeredAt > last.t)
+    if (!fits) return { ms: 0, heldMs, answeredAt: null }
+    const gap = last.t === null ? Infinity : answeredAt - last.t
+    return { ms: Math.max(0, Math.min(meta.thinkMs, gap)), heldMs, answeredAt }
   }
 
   vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: VoteTiming & { hints?: boolean | null } = {}) {

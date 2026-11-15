@@ -225,6 +225,13 @@ export const MIGRATIONS: string[] = [
       AND NOT EXISTS (SELECT 1 FROM xp_events x WHERE x.user_id = votes.user_id AND x.action = 'vote' AND x.ref = votes.card_id)
       AND NOT EXISTS (SELECT 1 FROM card_exposures e WHERE e.user_id = votes.user_id AND e.card_id = votes.card_id AND e.created_at <= votes.created_at);`,
   `ALTER TABLE votes ADD COLUMN answered_at INTEGER;`,
+  `CREATE TABLE card_firsts (
+     user_id TEXT NOT NULL,
+     card_id TEXT NOT NULL,
+     first_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, card_id)
+   );
+   INSERT OR IGNORE INTO card_firsts (user_id, card_id, first_at) SELECT user_id, card_id, issued_at FROM card_issues;`,
 ]
 
 const statements = new WeakMap<DB, Map<string, Database.Statement>>()

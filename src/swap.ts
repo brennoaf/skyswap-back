@@ -9,6 +9,7 @@ export const RETIRE_REAL_MIN = 5
 export const RETIRE_ART_P = 0.01
 export const RETIRE_ART_MIN = 3
 export const MAX_VOTES = 15
+export const MIN_PHOTOS_TO_CONFIRM = 3
 
 export const logit = (p: number): number => Math.log(p / (1 - p))
 export const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x))

@@ -104,7 +104,7 @@ export class Social extends StorePart {
     const items = [
       ...votes.filter((v) => this.kit.deckById.has(v.ref) || this.deck.hasSkyCard(v.ref)).map((v) => {
         const s = this.deck.swapCardFor(v.ref)
-        const status = this.deck.hasSkyCard(v.ref) ? this.deck.skyStatus(v.ref) : s && !s.gold ? s.status : null
+        const status = this.deck.hasSkyCard(v.ref) ? this.deck.skyStatus(v.ref) : s && !s.gold ? this.deck.cardStatus(v.ref) ?? null : null
         return { type: 'vote' as const, ref: v.ref, detail: v.detail, created_at: v.created_at, status, post: null }
       }),
       ...marks.filter((m) => this.kit.postsById.has(m.ref)).map((m) => ({ type: 'mark' as const, ref: m.ref, detail: String(m.detail), created_at: m.created_at, status: null, post: this.postBrief(m.ref) })),
@@ -129,7 +129,8 @@ export class Social extends StorePart {
     const votes = this.q('SELECT card_id, label, created_at FROM votes WHERE user_id = ? AND counted = 1').all(userId) as { card_id: string; label: string; created_at: number }[]
     for (const v of votes) {
       const s = this.deck.swapCardFor(v.card_id)
-      if (s && !s.gold && s.status !== 'open' && s.status !== 'real') out.push({ id: `consensus:${v.card_id}:${s.status}`, type: 'consensus', ref: v.card_id, detail: s.status, created_at: v.created_at, read: false })
+      const status = s && !s.gold ? this.deck.cardStatus(v.card_id) : undefined
+      if (status && status !== 'open' && status !== 'real') out.push({ id: `consensus:${v.card_id}:${status}`, type: 'consensus', ref: v.card_id, detail: status, created_at: v.created_at, read: false })
     }
     for (const e of this.deck.findings.eventsForAlerts(userId)) out.push({ id: e.id, type: e.followed ? 'finding_followed' : 'finding', ref: e.card_id, detail: e.state, created_at: e.created_at, read: false })
     for (const n of this.deck.findings.noteAlerts(userId)) out.push({ id: `note:${n.card_id}`, type: 'note', ref: n.card_id, detail: 'note', created_at: n.created_at, read: false })

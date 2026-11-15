@@ -8,6 +8,7 @@ export const KNOWN_GOLD_SHARE = 2 / 3
 export const GOLD_CLASS_LEAD = 3
 export const SKY_REVISIT_SHARE = 0.25
 export const SKY_REVISIT_QUIET_SHARE = 0.4
+export const SKY_REVISIT_MAX_SPAN_DAYS = 1
 export const SKY_REVISIT_PROBE = 40
 export const SKY_QUIET_KEPT = 256
 

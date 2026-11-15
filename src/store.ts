@@ -169,6 +169,10 @@ export class Store {
     return this.deck.vote(...args)
   }
 
+  cardStatus(...args: Parameters<Deck['cardStatus']>) {
+    return this.deck.cardStatus(...args)
+  }
+
   skyStatus(...args: Parameters<Deck['skyStatus']>) {
     return this.deck.skyStatus(...args)
   }

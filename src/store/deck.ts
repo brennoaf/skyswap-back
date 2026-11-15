@@ -6,6 +6,7 @@ import {
   mjdIso,
   QUIET_STREAK,
   SKY_QUIET_KEPT,
+  SKY_REVISIT_MAX_SPAN_DAYS,
   SKY_REVISIT_PROBE,
   SKY_REVISIT_QUIET_SHARE,
   SKY_REVISIT_SHARE,
@@ -22,7 +23,7 @@ import type { BadgeKey, XpResult } from '../gamification.js'
 import { ang2pixNest } from '../healpix.js'
 import type { DeckCard } from '../kit.js'
 import { cleanNote } from '../notes.js'
-import { applyVote, goldRate, SwapCard, SwapUser, type Label } from '../swap.js'
+import { applyVote, goldRate, MAX_VOTES, MIN_PHOTOS_TO_CONFIRM, SwapCard, SwapUser, type CardStatus, type Label } from '../swap.js'
 import { CHOICE_LABEL, HttpError, StorePart, type Choice, type NextSlot, type StoreContext, type VotePosition } from './base.js'
 import type { Xp } from './xp.js'
 
@@ -58,7 +59,7 @@ export class Deck extends StorePart {
     this.backfillCells()
     this.rebuildSwap()
     this.findings = new Findings(this.db, () => this.now(), {
-      status: (id) => this.swapCards.get(id)?.status,
+      status: (id) => this.cardStatus(id),
       card: (id) => this.findingCard(id),
       positions: (id) => this.votedPositions(id),
       dataVersion: this.kit.manifest?.version ?? 'unknown',
@@ -208,13 +209,17 @@ export class Deck extends StorePart {
   private trackSky(id: string): void {
     const s = this.swapCards.get(id)
     if (!s || !this.skyCards.has(id)) return
-    const open = s.status === 'open'
-    if (s.status === 'real') this.candidateSky.add(id)
+    const status = this.cardStatus(id)
+    const open = status === 'open'
+    if (status === 'real') this.candidateSky.add(id)
     else this.candidateSky.delete(id)
-    if (open && s.nReal > 0) this.hotSky.add(id)
+    const card = this.skyCards.get(id)
+    const mjds = card ? card.frames.map((f) => f.mjd) : []
+    const again = open && Math.max(...mjds) - Math.min(...mjds) <= SKY_REVISIT_MAX_SPAN_DAYS
+    if (again && s.nReal > 0) this.hotSky.add(id)
     else this.hotSky.delete(id)
     this.quietSky.delete(id)
-    if (!open || s.nReal > 0 || s.nVotes === 0) return
+    if (!again || s.nReal > 0 || s.nVotes === 0) return
     this.quietSky.add(id)
     while (this.quietSky.size > SKY_QUIET_KEPT) {
       const oldest = this.quietSky.values().next()
@@ -241,13 +246,17 @@ export class Deck extends StorePart {
   }
 
   private isOpenDeckCard(card: DeckCard, seen: Set<string>): boolean {
-    return !card.gold && !EXAMPLE_IDS.has(card.id) && !seen.has(card.id) && this.swapCards.get(card.id)?.status === 'open'
+    return !card.gold && !EXAMPLE_IDS.has(card.id) && !seen.has(card.id) && this.cardStatus(card.id) === 'open'
+  }
+
+  private canClose(card: DeckCard, seen: Set<string>): boolean {
+    return card.n_frames >= MIN_PHOTOS_TO_CONFIRM && this.isOpenDeckCard(card, seen)
   }
 
   openCards(userId: string | null): number {
     const seen = userId ? this.deckSeen(userId) : new Set<string>()
     let n = 0
-    for (const c of this.kit.deck) if (this.isOpenDeckCard(c, seen)) n += 1
+    for (const c of this.kit.deck) if (this.canClose(c, seen)) n += 1
     return n
   }
 
@@ -255,7 +264,7 @@ export class Deck extends StorePart {
     const seen = this.deckSeen(userId, opts.not)
     const n = this.voteCount(userId)
     const canExplore = !!opts.explore && !opts.known && this.kit.indexCells.length > 0
-    if (opts.open && this.kit.deck.some((c) => this.isOpenDeckCard(c, seen))) return { card: this.pickKnown(userId, seen, goldRate(n), false), sky: false, spot: null }
+    if (opts.open && this.kit.deck.some((c) => this.canClose(c, seen))) return { card: this.pickKnown(userId, seen, goldRate(n), false, true), sky: false, spot: null }
     if (opts.explore && this.quietStreak(userId)) {
       const movers = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id) && !EXAMPLE_IDS.has(c.id))
       const pick = movers[Math.floor(this.random() * movers.length)]
@@ -278,14 +287,14 @@ export class Deck extends StorePart {
     return this.pickKnown(userId, this.deckSeen(userId), goldRate(this.voteCount(userId)), false)
   }
 
-  private pickKnown(userId: string, seen: Set<string>, goldShare: number, hasSky: boolean): DeckCard | null {
+  private pickKnown(userId: string, seen: Set<string>, goldShare: number, hasSky: boolean, closable = false): DeckCard | null {
     const gold: Record<Gold, DeckCard[]> = { real: [], artifact: [] }
     const served: Record<Gold, number> = { real: 0, artifact: 0 }
     const open: DeckCard[] = []
     for (const c of this.kit.deck) {
       if (EXAMPLE_IDS.has(c.id)) continue
       if (!c.gold) {
-        if (this.isOpenDeckCard(c, seen)) open.push(c)
+        if (closable ? this.canClose(c, seen) : this.isOpenDeckCard(c, seen)) open.push(c)
       } else if (seen.has(c.id)) served[c.gold] += 1
       else gold[c.gold].push(c)
     }
@@ -453,7 +462,22 @@ export class Deck extends StorePart {
   skyStatus(id: string): string {
     const s = this.swapCards.get(id)
     if (!s) return 'open'
-    return s.status === 'real' ? 'candidate' : s.status
+    const status = this.cardStatus(id) ?? 'open'
+    return status === 'real' ? 'candidate' : status
+  }
+
+  photosOf(id: string): number {
+    const deck = this.kit.deckById.get(id)
+    if (deck) return deck.n_frames
+    const sky = this.skyCards.get(id)
+    return sky ? skyVisits(sky.frames).length : 0
+  }
+
+  cardStatus(id: string): CardStatus | undefined {
+    const s = this.swapCards.get(id)
+    if (!s) return undefined
+    if (s.status === 'real' && this.photosOf(id) < MIN_PHOTOS_TO_CONFIRM) return s.nVotes >= MAX_VOTES ? 'inconclusive' : 'open'
+    return s.status
   }
 
   skyReveal(card: SkyCard, choice: Choice) {
@@ -462,7 +486,7 @@ export class Deck extends StorePart {
     return {
       your_choice: choice,
       looked,
-      outcome: OUTCOME[s.status] ?? 'open',
+      outcome: OUTCOME[this.cardStatus(card.id) ?? 'open'] ?? 'open',
       kind: 'sky',
       band: card.band,
       size_arcmin: Math.round(card.fov_deg * 60 * 100) / 100,
@@ -534,7 +558,7 @@ export class Deck extends StorePart {
     return {
       your_choice: choice,
       looked,
-      outcome: card.gold ? null : OUTCOME[s.status] ?? 'open',
+      outcome: card.gold ? null : OUTCOME[this.cardStatus(card.id) ?? 'open'] ?? 'open',
       kind: card.kind,
       band: card.band.replace('SPHEREx-', ''),
       size_arcmin: card.size_arcmin,
@@ -549,7 +573,7 @@ export class Deck extends StorePart {
       control: card.gold ? { truth: card.gold, correct } : null,
       p_real: card.gold ? null : Math.round(s.pReal * 1000) / 1000,
       votes: { real: s.nReal, artifact: s.nArt, unsure: s.nUnsure },
-      status: s.status,
+      status: this.cardStatus(card.id) ?? s.status,
     }
   }
 

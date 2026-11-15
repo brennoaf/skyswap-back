@@ -20,7 +20,7 @@ export const classifyRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, {
     const user = requireUser(req, reply)
     if (!user) return reply
     const r = store.next(user.id, { explore: req.query.explore, known: req.query.known, open: req.query.open, not: (req.query.not ?? '').split(',').filter(Boolean) })
-    return { done: !r.card && !r.sky, card: r.card ? publicCard(r.card) : null, sky: r.sky, interesting: r.interesting }
+    return { done: !r.card && !r.sky, card: r.card ? publicCard(r.card) : null, sky: r.sky, spot: r.spot }
   })
 
   app.get('/api/classify/shared/:id', { schema: { tags: ['classify'], params: Type.Object({ id: Type.String({ maxLength: 64 }) }), response: { 200: S.SharedCardResponse, 401: S.ErrorBody, 404: S.ErrorBody } } }, async (req, reply) => {

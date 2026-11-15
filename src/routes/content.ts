@@ -241,6 +241,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       fov,
       band,
       source: res.source,
+      incomplete: res.incomplete,
       cell: res.cell,
       tile_bytes: res.cell === null ? null : (kit.index.tile_bytes.get(res.cell) ?? null),
       total: images.length,

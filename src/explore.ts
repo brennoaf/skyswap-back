@@ -4,6 +4,12 @@ export const EXPLORE_ORDER = 5
 export const WARMUP_CARDS = 10
 export const WARMUP_KNOWN_SHARE = 0.9
 export const QUIET_STREAK = 5
+export const KNOWN_GOLD_SHARE = 2 / 3
+export const GOLD_CLASS_LEAD = 3
+export const SKY_REVISIT_SHARE = 0.25
+export const SKY_REVISIT_QUIET_SHARE = 0.4
+export const SKY_REVISIT_PROBE = 40
+export const SKY_QUIET_KEPT = 256
 
 export interface SkyFrame {
   key: string
@@ -23,7 +29,9 @@ export function skyVisits(frames: SkyFrame[]): SkyVisit[] {
   const groups = new Map<number, SkyFrame[]>()
   frames.forEach((f, i) => {
     const v = f.visit ?? i
-    groups.set(v, [...(groups.get(v) ?? []), f])
+    const group = groups.get(v)
+    if (group) group.push(f)
+    else groups.set(v, [f])
   })
   return [...groups.values()]
     .map((g) => ({
@@ -45,6 +53,20 @@ export interface SkyCard {
   size_px: number
   frames: SkyFrame[]
   created_at: number
+}
+
+export interface SkySpot {
+  id: string
+  ra: number
+  dec: number
+  fov_deg: number
+  band: string
+  size_px: number
+  frames: { key: string; mjd: number; wl_um: number; visit: number }[]
+}
+
+export function skySpot(card: SkyCard): SkySpot {
+  return { id: card.id, ra: card.ra, dec: card.dec, fov_deg: card.fov_deg, band: card.band, size_px: card.size_px, frames: card.frames.map((f, i) => ({ key: f.key, mjd: f.mjd, wl_um: f.wl_um, visit: f.visit ?? i })) }
 }
 
 export function skyCardId(ra: number, dec: number, fovDeg: number, band: string): string {

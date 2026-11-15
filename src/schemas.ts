@@ -168,7 +168,20 @@ const deckCardFields = {
 
 export const DeckCardPublic = Type.Object(deckCardFields, { $id: 'DeckCard' })
 
-export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic), sky: Type.Boolean(), interesting: Type.Boolean() }, { $id: 'NextCardResponse' })
+export const SkySpot = Type.Object(
+  {
+    id: Type.String(),
+    ra: Type.Number(),
+    dec: Type.Number(),
+    fov_deg: Type.Number(),
+    band: Type.String(),
+    size_px: Type.Integer(),
+    frames: Type.Array(Type.Object({ key: Type.String(), mjd: Type.Number(), wl_um: Type.Number(), visit: Type.Integer() })),
+  },
+  { $id: 'SkySpot', description: 'A sky card that already exists, in the shape POST /api/classify/sky takes. Build it and register it like a fresh one.' },
+)
+
+export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic), sky: Type.Boolean(), spot: Nullable(SkySpot) }, { $id: 'NextCardResponse' })
 
 export const NextCardQuery = Type.Object({ explore: Type.Optional(Type.Boolean()), known: Type.Optional(Type.Boolean()), open: Type.Optional(Type.Boolean()), not: Type.Optional(Type.String({ maxLength: 200 })) })
 
@@ -256,7 +269,7 @@ export const Reveal = Type.Object(
     dec: Type.Number(),
     marks: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })),
     control: Nullable(Type.Object({ truth: Type.String(), correct: Nullable(Type.Boolean()) })),
-    p_real: Nullable(Type.Number()),
+    p_real: Nullable(Type.Number({ description: 'Estimate, not a verdict: the chance that it moves, computed from the answers so far.' })),
     votes: Type.Object({ real: Type.Integer(), artifact: Type.Integer(), unsure: Type.Integer() }),
     status: Type.String(),
   },
@@ -375,7 +388,8 @@ export const SkyResponse = Type.Object(
     dec: Type.Number(),
     fov: Type.Number(),
     band: Nullable(Type.String()),
-    source: Type.String(),
+    source: Type.Union([Type.Literal('fragment'), Type.Literal('sia'), Type.Literal('none')]),
+    incomplete: Type.Boolean({ description: 'True when the archive could not be asked (offline) or did not answer for every collection: an empty or short list is then not proof that no image exists.' }),
     cell: Nullable(Type.Integer()),
     tile_bytes: Nullable(Type.Integer()),
     total: Type.Integer(),

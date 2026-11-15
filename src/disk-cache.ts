@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto'
-import { mkdirSync, readdirSync, statSync } from 'node:fs'
-import { readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { readFile, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 interface Entry {
@@ -18,6 +18,7 @@ export class DiskCache {
     mkdirSync(dir, { recursive: true })
     const found: [string, Entry][] = []
     for (const name of readdirSync(dir)) {
+      if (/^[0-9a-f]{40}\.[0-9a-f]+\.tmp$/.test(name)) rmSync(join(dir, name), { force: true })
       if (!/^[0-9a-f]{40}$/.test(name)) continue
       const st = statSync(join(dir, name))
       found.push([name, { size: st.size, used: st.mtimeMs }])
@@ -66,12 +67,19 @@ export class DiskCache {
 
   async put(key: string, buf: Buffer): Promise<void> {
     if (buf.length > this.maxBytes) return
+    const tmp = join(this.dir, `${key}.${randomBytes(6).toString('hex')}.tmp`)
+    try {
+      await writeFile(tmp, buf)
+      await rename(tmp, join(this.dir, key))
+    } catch {
+      await rm(tmp, { force: true })
+      return
+    }
     const old = this.entries.get(key)
     if (old) {
       this.entries.delete(key)
       this.total -= old.size
     }
-    await writeFile(join(this.dir, key), buf)
     this.entries.set(key, { size: buf.length, used: this.now() })
     this.total += buf.length
     await this.evict()

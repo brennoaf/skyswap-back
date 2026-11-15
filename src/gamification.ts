@@ -22,6 +22,8 @@ export interface DayState {
 
 export type XpReason = 'ok' | 'too_fast' | 'daily_cap' | 'diminished' | 'repeat' | 'guided' | 'exposed'
 
+export const INACTIVE_REASONS: XpReason[] = ['too_fast', 'repeat']
+
 export interface XpResult {
   xp: number
   streakBonus: number
@@ -29,8 +31,15 @@ export interface XpResult {
   reason: XpReason
 }
 
-export function dayKey(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10)
+export const TZ_OFFSET_LIMIT_MIN = 840
+
+export function clampTzOffset(minutes: number): number {
+  if (!Number.isFinite(minutes)) return 0
+  return Math.max(-TZ_OFFSET_LIMIT_MIN, Math.min(TZ_OFFSET_LIMIT_MIN, Math.trunc(minutes)))
+}
+
+export function dayKey(ms: number, tzOffsetMin = 0): string {
+  return new Date(ms + tzOffsetMin * 60_000).toISOString().slice(0, 10)
 }
 
 export function previousDay(day: string): string {
@@ -46,8 +55,9 @@ export function nextStreak(lastActiveDay: string | null, streak: number, today: 
 export function scoreAction(action: XpAction, state: DayState, opts: { ms?: number; repeat?: boolean } = {}): XpResult {
   const streak = nextStreak(state.lastActiveDay, state.streak, state.day)
   const firstToday = state.lastActiveDay !== state.day
-  if (action === 'vote' && (opts.ms ?? Infinity) < MIN_VOTE_MS) return { xp: 0, streakBonus: 0, streak: state.lastActiveDay === state.day ? state.streak : streak, reason: 'too_fast' }
-  if (opts.repeat) return { xp: 0, streakBonus: 0, streak, reason: 'repeat' }
+  const idle = { xp: 0, streakBonus: 0, streak: firstToday ? streak : state.streak }
+  if (action === 'vote' && (opts.ms ?? Infinity) < MIN_VOTE_MS) return { ...idle, reason: 'too_fast' }
+  if (opts.repeat) return { ...idle, reason: 'repeat' }
   const streakBonus = firstToday ? STREAK_STEP * Math.min(streak, STREAK_MAX_DAYS) : 0
   const count = state.countsToday[action] ?? 0
   const limit = SOFT_LIMITS[action]

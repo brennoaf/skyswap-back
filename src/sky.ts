@@ -17,6 +17,12 @@ export interface SkyResult {
   source: 'fragment' | 'sia' | 'none'
   cell: number | null
   images: SkyImage[]
+  incomplete: boolean
+}
+
+export interface SiaAnswer {
+  images: SkyImage[]
+  failed: boolean
 }
 
 interface TileHit {
@@ -68,8 +74,9 @@ export function parseVotable(xml: string): Record<string, string>[] {
 
 const SIA_COLLECTIONS = ['spherex_qr3', 'spherex_qr3_deep', 'spherex_qr2', 'spherex_qr2_deep']
 
-export async function imagesFromSia(ra: number, dec: number, fetchImpl: typeof fetch = fetch): Promise<SkyImage[]> {
+export async function imagesFromSia(ra: number, dec: number, fetchImpl: typeof fetch = fetch): Promise<SiaAnswer> {
   const all: SkyImage[] = []
+  let failed = false
   await Promise.all(
     SIA_COLLECTIONS.map(async (collection) => {
       const url = `https://irsa.ipac.caltech.edu/SIA?COLLECTION=${collection}&POS=CIRCLE+${ra}+${dec}+0.0003&RESPONSEFORMAT=VOTABLE`
@@ -77,7 +84,10 @@ export async function imagesFromSia(ra: number, dec: number, fetchImpl: typeof f
       const timer = setTimeout(() => ctrl.abort(), 30000)
       try {
         const r = await fetchImpl(url, { signal: ctrl.signal })
-        if (!r.ok) return
+        if (!r.ok) {
+          failed = true
+          return
+        }
         for (const row of parseVotable(await r.text())) {
           const access = row.access_url ?? ''
           const key = access.split('/spherex/')[1]
@@ -97,13 +107,13 @@ export async function imagesFromSia(ra: number, dec: number, fetchImpl: typeof f
           })
         }
       } catch {
-        return
+        failed = true
       } finally {
         clearTimeout(timer)
       }
     }),
   )
-  return all.sort((a, b) => a.mjd - b.mjd)
+  return { images: all.sort((a, b) => a.mjd - b.mjd), failed }
 }
 
 export class LruCache<K, V> {
@@ -150,19 +160,26 @@ export function totalFileBytes(images: Pick<SkyImage, 'file_size'>[]): number | 
 }
 
 export const SIA_CACHE_MAX = 500
-export const siaCache = new LruCache<string, SkyImage[]>(SIA_CACHE_MAX)
+export const SIA_TTL_MS = 6 * 3_600_000
+export const SIA_EMPTY_TTL_MS = 5 * 60_000
+export const siaCache = new LruCache<string, { images: SkyImage[]; expires: number }>(SIA_CACHE_MAX)
 
-export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch; afterMjd?: number | null }): Promise<SkyResult> {
+export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch; afterMjd?: number | null; now?: () => number }): Promise<SkyResult> {
   const frag = await imagesFromFragment(indexDir, wave, ra, dec)
-  if (frag.images.length) return { source: 'fragment', cell: frag.cell, images: frag.images }
-  if (!opts.online) return { source: 'none', cell: frag.cell, images: [] }
+  if (frag.images.length) return { source: 'fragment', cell: frag.cell, images: frag.images, incomplete: false }
+  if (!opts.online) return { source: 'none', cell: frag.cell, images: [], incomplete: true }
+  const now = (opts.now ?? Date.now)()
   const key = `${ra.toFixed(4)},${dec.toFixed(4)}`
-  let images = siaCache.get(key)
+  const kept = siaCache.get(key)
+  let images = kept && kept.expires > now ? kept.images : null
+  let incomplete = false
   if (!images) {
-    images = await imagesFromSia(ra, dec, opts.fetchImpl)
-    siaCache.set(key, images)
+    const answer = await imagesFromSia(ra, dec, opts.fetchImpl)
+    images = answer.images
+    incomplete = answer.failed
+    if (!answer.failed) siaCache.set(key, { images, expires: now + (images.length ? SIA_TTL_MS : SIA_EMPTY_TTL_MS) })
   }
   const after = opts.afterMjd
   const fresh = after == null ? images : images.filter((i) => i.mjd > after)
-  return { source: fresh.length ? 'sia' : 'none', cell: frag.cell, images: fresh }
+  return { source: fresh.length ? 'sia' : 'none', cell: frag.cell, images: fresh, incomplete }
 }

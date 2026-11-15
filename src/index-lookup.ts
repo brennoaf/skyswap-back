@@ -112,7 +112,11 @@ export function pointRows(rows: IndexRow[], wave: unknown, ra: number, dec: numb
 export function sampleRows(rows: IndexRow[], max: number): IndexRow[] {
   if (rows.length <= max) return rows
   const byBand = new Map<string, IndexRow[]>()
-  for (const r of rows) byBand.set(r.band, [...(byBand.get(r.band) ?? []), r])
+  for (const r of rows) {
+    const list = byBand.get(r.band)
+    if (list) list.push(r)
+    else byBand.set(r.band, [r])
+  }
   const quota = Math.max(PER_VISIT, Math.floor(max / byBand.size))
   const out: IndexRow[] = []
   for (const list of byBand.values()) {

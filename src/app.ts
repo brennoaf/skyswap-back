@@ -13,6 +13,7 @@ import type { Config } from './config.js'
 import { openDb, type DB } from './db.js'
 import { DiskCache } from './disk-cache.js'
 import { loadKit, type Kit } from './kit.js'
+import { clampTzOffset } from './gamification.js'
 import { HttpError, Store, type User } from './store.js'
 import * as S from './schemas.js'
 import { contentRoutes } from './routes/content.js'
@@ -25,6 +26,14 @@ import { AvatarRefill, type RefillOptions } from './avatar-refill.js'
 export const SESSION_COOKIE = 'ss_session'
 const CHECK_RETRY_MS = 10 * 60_000
 export const TRUSTED_PROXY = '127.0.0.1'
+export const TZ_HEADER = 'x-tz-offset'
+const API_PREFIX = '/api/'
+
+export function parseTzOffset(value: string | string[] | undefined): number | null {
+  const text = Array.isArray(value) ? value[0] : value
+  if (text === undefined || !/^[+-]?\d{1,4}$/.test(text.trim())) return null
+  return clampTzOffset(Number(text))
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -48,7 +57,8 @@ export async function buildApp(deps: AppDeps) {
   const kit = deps.kit ?? loadKit(config.dataDir)
   const db = deps.db ?? openDb(config.dbPath)
   const store = new Store(db, kit, deps.now, deps.random)
-  const app = Fastify({ logger: false, trustProxy: TRUSTED_PROXY }).withTypeProvider<TypeBoxTypeProvider>()
+  const app = Fastify({ logger: config.logLevel === 'silent' ? false : { level: config.logLevel }, trustProxy: TRUSTED_PROXY }).withTypeProvider<TypeBoxTypeProvider>()
+  store.findings.onError = (err, cardId) => app.log.error({ err, cardId }, 'finding checks failed')
 
   await app.register(cookie, { secret: config.cookieSecret })
   await app.register(cors, { origin: [config.webOrigin], credentials: true })
@@ -56,24 +66,32 @@ export async function buildApp(deps: AppDeps) {
   await app.register(swagger, {
     openapi: {
       openapi: '3.1.0',
-      info: { title: 'SkySwap API', version: '0.1.0', description: 'Sky objects from real NASA SPHEREx images, served from the SkySwap data kit.' },
+      info: {
+        title: 'SkySwap API',
+        version: '0.1.0',
+        description: `Sky objects from real NASA SPHEREx images, served from the SkySwap data kit. Send the header ${TZ_HEADER} (minutes east of UTC, for example -180 in Brasilia) so days for streaks and daily limits follow the local calendar.`,
+      },
       components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: SESSION_COOKIE } } },
     },
     refResolver: { buildLocalReference: (json, _baseUri, _fragment, i) => (typeof json.$id === 'string' ? json.$id : `def-${i}`) },
   })
   await app.register(swaggerUi, { routePrefix: '/docs' })
 
-  for (const schema of [S.FindingSummary, S.CommunityFeed, S.FindingDetail, S.MyCards, S.CreditResponse, S.ErrorBody, S.ObjectCard, S.FrameDto, S.TagSummary, S.PostDto, S.FeedItem, S.XpDto, S.UserDto, S.Reveal, S.DeckCardPublic, S.SpotDto]) app.addSchema(schema)
+  for (const schema of [S.SkySpot, S.FindingSummary, S.CommunityFeed, S.FindingDetail, S.MyCards, S.CreditResponse, S.ErrorBody, S.ObjectCard, S.FrameDto, S.TagSummary, S.PostDto, S.FeedItem, S.XpDto, S.UserDto, S.Reveal, S.DeckCardPublic, S.SpotDto]) app.addSchema(schema)
 
   app.decorateRequest('user', null)
   app.addHook('onRequest', async (req) => {
+    if (!req.url.startsWith(API_PREFIX)) return
     req.user = store.userByToken(req.cookies[SESSION_COOKIE])
+    const tz = parseTzOffset(req.headers[TZ_HEADER])
+    if (req.user && tz !== null) store.setTimezone(req.user.id, tz)
   })
 
-  app.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown }, _req, reply) => {
+  app.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown }, req, reply) => {
     if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
     if (err.validation) return reply.status(400).send({ error: 'invalid_request' })
     if (err.statusCode === 429) return reply.status(429).send({ error: 'rate_limited' })
+    if (!err.statusCode || err.statusCode >= 500) req.log.error({ err, method: req.method, url: req.url }, 'request failed')
     return reply.status(err.statusCode && err.statusCode < 500 ? err.statusCode : 500).send({ error: err.statusCode && err.statusCode < 500 ? err.message : 'internal_error' })
   })
 

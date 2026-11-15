@@ -210,7 +210,37 @@ export const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL,
      PRIMARY KEY (user_id, card_id)
    );`,
+  `CREATE INDEX votes_card ON votes(card_id, counted, label);
+   CREATE INDEX votes_user ON votes(user_id);
+   CREATE INDEX votes_created ON votes(created_at);
+   CREATE INDEX xp_user ON xp_events(user_id);
+   CREATE INDEX xp_user_ref ON xp_events(user_id, action, ref);
+   CREATE INDEX marks_created ON marks(created_at);
+   CREATE INDEX tags_created ON tags(created_at);
+   CREATE INDEX findings_state ON findings(state, updated_at DESC);
+   ALTER TABLE users ADD COLUMN tz_offset_min INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE votes ADD COLUMN practice INTEGER NOT NULL DEFAULT 0;
+   UPDATE votes SET practice = 1
+    WHERE counted = 0
+      AND NOT EXISTS (SELECT 1 FROM xp_events x WHERE x.user_id = votes.user_id AND x.action = 'vote' AND x.ref = votes.card_id)
+      AND NOT EXISTS (SELECT 1 FROM card_exposures e WHERE e.user_id = votes.user_id AND e.card_id = votes.card_id AND e.created_at <= votes.created_at);`,
 ]
+
+const statements = new WeakMap<DB, Map<string, Database.Statement>>()
+
+export function prepared(db: DB, sql: string): Database.Statement {
+  let cache = statements.get(db)
+  if (!cache) {
+    cache = new Map()
+    statements.set(db, cache)
+  }
+  let stmt = cache.get(sql)
+  if (!stmt) {
+    stmt = db.prepare(sql)
+    cache.set(sql, stmt)
+  }
+  return stmt
+}
 
 export function openDb(path: string): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })

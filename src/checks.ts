@@ -19,6 +19,7 @@ export interface CheckPoint {
   name: string
   ra: number
   dec: number
+  mjd?: number
 }
 
 export interface CheckOutcome {

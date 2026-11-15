@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { CHECK_SERVICES, separationDeg, type Checker, type CheckPoint, type CheckResult, type CheckService, type CheckTarget } from './checks.js'
-import type { DB } from './db.js'
+import { CHECK_SERVICES, separationDeg, type Checker, type CheckOutcome, type CheckPoint, type CheckResult, type CheckService, type CheckTarget } from './checks.js'
+import { prepared, type DB } from './db.js'
 
 export const FINDING_STATES = ['candidate', 'known', 'likely_artifact', 'package_ready', 'in_review', 'published', 'discarded'] as const
 export type FindingState = (typeof FINDING_STATES)[number]
@@ -8,6 +8,9 @@ export type FindingState = (typeof FINDING_STATES)[number]
 const HUMAN_STATES: FindingState[] = ['in_review', 'published', 'discarded']
 const STATE_FROM_CHECKS: CheckService[] = ['gaia', 'asteroids']
 const MATCH_DEG = 25 / 3600
+const SAME_EPOCH_DAYS = 1e-4
+const EPOCH_SERVICES: CheckService[] = ['asteroids']
+const MAX_NAMES = 5
 const RETRY_BASE_MS = 30 * 60_000
 const MAX_ATTEMPTS = 8
 const PAGE = 12
@@ -42,7 +45,7 @@ export interface FindingCard {
 export interface FindingDeps {
   status: (cardId: string) => string | undefined
   card: (cardId: string) => FindingCard | null
-  position: (cardId: string) => { ra: number; dec: number } | null
+  positions: (cardId: string) => { mjd: number; ra: number; dec: number }[]
   dataVersion: string
 }
 
@@ -72,20 +75,21 @@ function stableOrder(cardId: string, userId: string): string {
 export function decideFinding(db: DB, cardId: string, state: FindingState, opts: { reason?: string | null; url?: string | null; now: number; dataVersion: string }): void {
   if (!HUMAN_STATES.includes(state)) throw new Error('human_states_only')
   if (state === 'published' && !/^https?:\/\/\S+$/.test(opts.url ?? '')) throw new Error('published_needs_source')
-  const row = db.prepare('SELECT 1 FROM findings WHERE card_id = ?').get(cardId)
+  const row = prepared(db, 'SELECT 1 FROM findings WHERE card_id = ?').get(cardId)
   if (!row) throw new Error('unknown_finding')
   transition(db, cardId, state, { reason: opts.reason ?? null, source: 'human', url: opts.url ?? null, now: opts.now, dataVersion: opts.dataVersion })
 }
 
 function transition(db: DB, cardId: string, state: FindingState, e: { reason: string | null; source: string; url?: string | null; now: number; dataVersion: string; example?: boolean }): void {
   db.transaction(() => {
-    db.prepare('UPDATE findings SET state = ?, reason = ?, updated_at = ? WHERE card_id = ?').run(state, e.reason, e.now, cardId)
-    db.prepare('INSERT INTO finding_events (card_id, state, reason, source, url, data_version, example, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(cardId, state, e.reason, e.source, e.url ?? null, e.dataVersion, e.example ? 1 : 0, e.now)
+    prepared(db, 'UPDATE findings SET state = ?, reason = ?, updated_at = ? WHERE card_id = ?').run(state, e.reason, e.now, cardId)
+    prepared(db, 'INSERT INTO finding_events (card_id, state, reason, source, url, data_version, example, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(cardId, state, e.reason, e.source, e.url ?? null, e.dataVersion, e.example ? 1 : 0, e.now)
   })()
 }
 
 export class Findings {
   private checker: Checker | null = null
+  onError: (err: unknown, cardId: string) => void = () => undefined
   private running = new Map<string, Promise<void>>()
 
   constructor(
@@ -94,12 +98,16 @@ export class Findings {
     private deps: FindingDeps,
   ) {}
 
+  private q(sql: string) {
+    return prepared(this.db, sql)
+  }
+
   attachChecker(checker: Checker): void {
     this.checker = checker
   }
 
   private row(cardId: string): FindingRow | undefined {
-    return this.db.prepare('SELECT * FROM findings WHERE card_id = ?').get(cardId) as FindingRow | undefined
+    return this.q('SELECT * FROM findings WHERE card_id = ?').get(cardId) as FindingRow | undefined
   }
 
   sync(cardId: string): void {
@@ -110,8 +118,8 @@ export class Findings {
     const base = { now: this.now(), dataVersion: this.deps.dataVersion }
     if (!f) {
       if (status !== 'real') return
-      this.db.prepare('INSERT INTO findings (card_id, state, reason, example, credits, created_at, updated_at) VALUES (?, ?, NULL, 0, NULL, ?, ?)').run(cardId, 'candidate', base.now, base.now)
-      this.db.prepare('INSERT INTO finding_events (card_id, state, reason, source, url, data_version, example, created_at) VALUES (?, ?, NULL, ?, NULL, ?, 0, ?)').run(cardId, 'candidate', 'votes', base.dataVersion, base.now)
+      this.q('INSERT INTO findings (card_id, state, reason, example, credits, created_at, updated_at) VALUES (?, ?, NULL, 0, NULL, ?, ?)').run(cardId, 'candidate', base.now, base.now)
+      this.q('INSERT INTO finding_events (card_id, state, reason, source, url, data_version, example, created_at) VALUES (?, ?, NULL, ?, NULL, ?, 0, ?)').run(cardId, 'candidate', 'votes', base.dataVersion, base.now)
       if (card.known) {
         this.saveCheck(cardId, 'asteroids', 'found', [card.known], 'data_kit')
         transition(this.db, cardId, 'known', { ...base, reason: card.known, source: 'check' })
@@ -130,34 +138,58 @@ export class Findings {
   }
 
   private saveCheck(cardId: string, service: CheckService, result: CheckResult, names: string[], note: string | null, points: CheckPoint[] = []): void {
-    this.db
-      .prepare(
+    this.q(
         `INSERT INTO finding_checks (card_id, service, result, names, note, points, checked_at, attempts) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
          ON CONFLICT(card_id, service) DO UPDATE SET result = excluded.result, names = excluded.names, note = excluded.note, points = excluded.points, checked_at = excluded.checked_at, attempts = attempts + 1`,
       )
       .run(cardId, service, result, JSON.stringify(names), note, JSON.stringify(points), this.now())
   }
 
-  private target(card: FindingCard): CheckTarget {
-    const sorted = [...card.mjds].sort((a, b) => a - b)
-    return { ra: card.ra, dec: card.dec, fov_deg: card.fov_deg, mjd: sorted[Math.floor(sorted.length / 2)] ?? 0 }
+  private target(card: FindingCard, mjd: number): CheckTarget {
+    return { ra: card.ra, dec: card.dec, fov_deg: card.fov_deg, mjd }
+  }
+
+  private epochs(card: FindingCard): number[] {
+    return [...new Set(card.mjds)].sort((a, b) => a - b)
   }
 
   scheduleChecks(cardId: string): void {
     if (!this.checker || this.running.has(cardId)) return
-    const work = this.runChecks(cardId).finally(() => this.running.delete(cardId))
+    const work = this.runChecks(cardId)
+      .catch((err: unknown) => this.onError(err, cardId))
+      .finally(() => this.running.delete(cardId))
     this.running.set(cardId, work)
+  }
+
+  private async checkService(checker: Checker, service: CheckService, card: FindingCard): Promise<CheckOutcome> {
+    const epochs = this.epochs(card)
+    const middle = epochs[Math.floor(epochs.length / 2)] ?? 0
+    if (!EPOCH_SERVICES.includes(service) || epochs.length < 2) return checker(service, this.target(card, middle))
+    const names = new Set<string>()
+    const points: CheckPoint[] = []
+    for (const mjd of epochs) {
+      const out = await checker(service, this.target(card, mjd))
+      if (out.result === 'unavailable') return out
+      for (const n of out.names) names.add(n)
+      for (const p of out.points ?? []) points.push({ ...p, mjd })
+    }
+    return { result: points.length || names.size ? 'found' : 'nothing', names: [...names].slice(0, MAX_NAMES), note: null, points }
   }
 
   private async runChecks(cardId: string): Promise<void> {
     const card = this.deps.card(cardId)
     const checker = this.checker
     if (!card || !checker) return
-    const existing = new Map((this.db.prepare('SELECT service, result FROM finding_checks WHERE card_id = ?').all(cardId) as { service: CheckService; result: CheckResult }[]).map((r) => [r.service, r.result]))
-    const target = this.target(card)
+    const existing = new Map((this.q('SELECT service, result FROM finding_checks WHERE card_id = ?').all(cardId) as { service: CheckService; result: CheckResult }[]).map((r) => [r.service, r.result]))
     await Promise.all(
       CHECK_SERVICES.filter((s) => existing.get(s) === undefined || existing.get(s) === 'unavailable').map(async (service) => {
-        const out = await checker(service, target)
+        let out: CheckOutcome
+        try {
+          out = await this.checkService(checker, service, card)
+        } catch (err) {
+          this.onError(err, cardId)
+          out = { result: 'unavailable', names: [], note: 'error' }
+        }
         this.saveCheck(cardId, service, out.result, out.names, out.note, out.points)
       }),
     )
@@ -167,19 +199,21 @@ export class Findings {
   private applyChecks(cardId: string): void {
     const f = this.row(cardId)
     if (!f || f.state !== 'candidate') return
-    const at = this.deps.position(cardId)
-    if (!at) return
-    const rows = this.db.prepare('SELECT service, points FROM finding_checks WHERE card_id = ? AND result = ?').all(cardId, 'found') as { service: CheckService; points: string | null }[]
+    const seen = this.deps.positions(cardId)
+    if (!seen.length) return
+    const rows = this.q('SELECT service, points FROM finding_checks WHERE card_id = ? AND result = ?').all(cardId, 'found') as { service: CheckService; points: string | null }[]
     for (const r of rows) {
       if (!STATE_FROM_CHECKS.includes(r.service)) continue
-      const hit = (JSON.parse(r.points ?? '[]') as CheckPoint[]).find((p) => separationDeg(p.ra, p.dec, at.ra, at.dec) <= MATCH_DEG)
+      const hit = (JSON.parse(r.points ?? '[]') as CheckPoint[]).find((p) => seen.some((at) => (p.mjd === undefined || Math.abs(p.mjd - at.mjd) <= SAME_EPOCH_DAYS) && separationDeg(p.ra, p.dec, at.ra, at.dec) <= MATCH_DEG))
       if (hit) return transition(this.db, cardId, 'known', { now: this.now(), dataVersion: this.deps.dataVersion, reason: hit.name, source: 'check' })
     }
   }
 
   retryDue(): void {
-    const rows = this.db.prepare("SELECT card_id, attempts, checked_at, note FROM finding_checks WHERE result = 'unavailable' AND service != 'quality' AND attempts < ?").all(MAX_ATTEMPTS) as { card_id: string; attempts: number; checked_at: number; note: string | null }[]
+    const rows = this.q("SELECT card_id, attempts, checked_at, note FROM finding_checks WHERE result = 'unavailable' AND service != 'quality' AND attempts < ?").all(MAX_ATTEMPTS) as { card_id: string; attempts: number; checked_at: number; note: string | null }[]
     for (const r of rows) if (r.note !== 'offline' && this.now() - r.checked_at >= RETRY_BASE_MS * 2 ** (r.attempts - 1)) this.scheduleChecks(r.card_id)
+    const unfinished = this.q('SELECT f.card_id FROM findings f WHERE f.example = 0 AND (SELECT COUNT(*) FROM finding_checks c WHERE c.card_id = f.card_id) < ?').all(CHECK_SERVICES.length) as { card_id: string }[]
+    for (const r of unfinished) this.scheduleChecks(r.card_id)
   }
 
   async drain(): Promise<void> {
@@ -191,24 +225,23 @@ export class Findings {
   }
 
   expose(userId: string, cardIds: string[], source: 'feed' | 'link'): void {
-    const ins = this.db.prepare('INSERT OR IGNORE INTO card_exposures (user_id, card_id, source, created_at) VALUES (?, ?, ?, ?)')
+    const ins = this.q('INSERT OR IGNORE INTO card_exposures (user_id, card_id, source, created_at) VALUES (?, ?, ?, ?)')
     this.db.transaction(() => {
       for (const id of cardIds) if (!id.startsWith(EXAMPLE_PREFIX)) ins.run(userId, id, source, this.now())
     })()
   }
 
   isExposed(userId: string, cardId: string): boolean {
-    return !!this.db.prepare('SELECT 1 FROM card_exposures WHERE user_id = ? AND card_id = ?').get(userId, cardId)
+    return !!this.q('SELECT 1 FROM card_exposures WHERE user_id = ? AND card_id = ?').get(userId, cardId)
   }
 
   exposedCards(userId: string): string[] {
-    return (this.db.prepare('SELECT card_id FROM card_exposures WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id)
+    return (this.q('SELECT card_id FROM card_exposures WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id)
   }
 
   private credits(f: FindingRow): { names: string[]; anonymous: number } {
     if (f.credits) return { names: JSON.parse(f.credits) as string[], anonymous: 0 }
-    const rows = this.db
-      .prepare(
+    const rows = this.q(
         `SELECT DISTINCT u.id, u.nickname, u.credit_visible FROM users u
          WHERE u.id IN (
            SELECT user_id FROM votes WHERE card_id = @id AND counted = 1 AND created_at <= @at AND (label = 'real' OR position IS NOT NULL)
@@ -221,7 +254,7 @@ export class Findings {
   }
 
   private firstRow(f: FindingRow) {
-    return this.db.prepare("SELECT u.id AS user_id, u.nickname, u.credit_visible, v.created_at, v.note FROM votes v JOIN users u ON u.id = v.user_id WHERE v.card_id = ? AND v.counted = 1 AND v.label = 'real' ORDER BY v.id LIMIT 1").get(f.card_id) as
+    return this.q("SELECT u.id AS user_id, u.nickname, u.credit_visible, v.created_at, v.note FROM votes v JOIN users u ON u.id = v.user_id WHERE v.card_id = ? AND v.counted = 1 AND v.label = 'real' ORDER BY v.id LIMIT 1").get(f.card_id) as
       | { user_id: string; nickname: string; credit_visible: number; created_at: number; note: string | null }
       | undefined
   }
@@ -240,12 +273,12 @@ export class Findings {
     const f = this.row(cardId)
     const r = f ? this.firstRow(f) : undefined
     if (!f || !r || !this.noteShown(f, r)) return false
-    this.db.prepare('INSERT OR IGNORE INTO note_reports (user_id, card_id, created_at) VALUES (?, ?, ?)').run(userId, cardId, this.now())
+    this.q('INSERT OR IGNORE INTO note_reports (user_id, card_id, created_at) VALUES (?, ?, ?)').run(userId, cardId, this.now())
     return true
   }
 
   noteAlerts(userId: string): { card_id: string; created_at: number }[] {
-    const rows = this.db.prepare("SELECT f.* FROM findings f WHERE f.example = 0 AND f.card_id IN (SELECT card_id FROM votes WHERE user_id = ? AND counted = 1 AND label = 'real' AND note IS NOT NULL)").all(userId) as FindingRow[]
+    const rows = this.q("SELECT f.* FROM findings f WHERE f.example = 0 AND f.card_id IN (SELECT card_id FROM votes WHERE user_id = ? AND counted = 1 AND label = 'real' AND note IS NOT NULL)").all(userId) as FindingRow[]
     return rows.flatMap((f) => {
       const r = this.firstRow(f)
       return r && r.user_id === userId && this.noteShown(f, r) ? [{ card_id: f.card_id, created_at: f.created_at }] : []
@@ -253,16 +286,15 @@ export class Findings {
   }
 
   private checkRows(cardId: string): CheckRow[] {
-    return this.db.prepare('SELECT service, result, names, note, checked_at, attempts FROM finding_checks WHERE card_id = ?').all(cardId) as CheckRow[]
+    return this.q('SELECT service, result, names, note, checked_at, attempts FROM finding_checks WHERE card_id = ?').all(cardId) as CheckRow[]
   }
 
   setReaction(userId: string, cardId: string, kind: ReactionKind, on: boolean, reason: DoubtReason | null = null, position: { frame: number; x: number; y: number } | null = null): void {
     if (!on) {
-      this.db.prepare('DELETE FROM reactions WHERE user_id = ? AND card_id = ? AND kind = ?').run(userId, cardId, kind)
+      this.q('DELETE FROM reactions WHERE user_id = ? AND card_id = ? AND kind = ?').run(userId, cardId, kind)
       return
     }
-    this.db
-      .prepare(
+    this.q(
         `INSERT INTO reactions (user_id, card_id, kind, reason, position, created_at) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, card_id, kind) DO UPDATE SET reason = excluded.reason, position = COALESCE(excluded.position, position)`,
       )
@@ -270,22 +302,22 @@ export class Findings {
   }
 
   secondLook(userId: string, cardId: string, label: string): boolean {
-    if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) return false
-    this.db.prepare('INSERT INTO second_looks (user_id, card_id, label, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET label = excluded.label').run(userId, cardId, label, this.now())
+    if (this.q('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) return false
+    this.q('INSERT INTO second_looks (user_id, card_id, label, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET label = excluded.label').run(userId, cardId, label, this.now())
     return true
   }
 
   setFollow(userId: string, cardId: string, on: boolean): void {
-    if (on) this.db.prepare('INSERT OR IGNORE INTO finding_follows (user_id, card_id, created_at) VALUES (?, ?, ?)').run(userId, cardId, this.now())
-    else this.db.prepare('DELETE FROM finding_follows WHERE user_id = ? AND card_id = ?').run(userId, cardId)
+    if (on) this.q('INSERT OR IGNORE INTO finding_follows (user_id, card_id, created_at) VALUES (?, ?, ?)').run(userId, cardId, this.now())
+    else this.q('DELETE FROM finding_follows WHERE user_id = ? AND card_id = ?').run(userId, cardId)
   }
 
   private count(sql: string, ...args: unknown[]): number {
-    return (this.db.prepare(sql).get(...args) as { n: number }).n
+    return (this.q(sql).get(...args) as { n: number }).n
   }
 
   social(cardId: string, userId: string | null) {
-    const reasons = this.db.prepare("SELECT reason, COUNT(*) AS n FROM reactions WHERE card_id = ? AND kind = 'doubt' GROUP BY reason").all(cardId) as { reason: DoubtReason; n: number }[]
+    const reasons = this.q("SELECT reason, COUNT(*) AS n FROM reactions WHERE card_id = ? AND kind = 'doubt' GROUP BY reason").all(cardId) as { reason: DoubtReason; n: number }[]
     const byReason = Object.fromEntries(DOUBT_REASONS.map((r) => [r, reasons.find((x) => x.reason === r)?.n ?? 0])) as Record<DoubtReason, number>
     return {
       interesting: this.count("SELECT COUNT(*) AS n FROM reactions WHERE card_id = ? AND kind = 'interesting'", cardId),
@@ -298,24 +330,24 @@ export class Findings {
   }
 
   private mine(cardId: string, userId: string) {
-    const rows = this.db.prepare('SELECT kind, reason FROM reactions WHERE card_id = ? AND user_id = ?').all(cardId, userId) as { kind: ReactionKind; reason: DoubtReason | null }[]
-    const look = this.db.prepare('SELECT label FROM second_looks WHERE card_id = ? AND user_id = ?').get(cardId, userId) as { label: string } | undefined
-    const vote = this.db.prepare('SELECT label FROM votes WHERE card_id = ? AND user_id = ?').get(cardId, userId) as { label: string } | undefined
+    const rows = this.q('SELECT kind, reason FROM reactions WHERE card_id = ? AND user_id = ?').all(cardId, userId) as { kind: ReactionKind; reason: DoubtReason | null }[]
+    const look = this.q('SELECT label FROM second_looks WHERE card_id = ? AND user_id = ?').get(cardId, userId) as { label: string } | undefined
+    const vote = this.q('SELECT label FROM votes WHERE card_id = ? AND user_id = ?').get(cardId, userId) as { label: string } | undefined
     return {
       interesting: rows.some((r) => r.kind === 'interesting'),
       doubt: rows.find((r) => r.kind === 'doubt')?.reason ?? null,
       second_look: look?.label ?? null,
       vote: vote?.label ?? null,
-      following: !!this.db.prepare('SELECT 1 FROM finding_follows WHERE card_id = ? AND user_id = ?').get(cardId, userId),
+      following: !!this.q('SELECT 1 FROM finding_follows WHERE card_id = ? AND user_id = ?').get(cardId, userId),
     }
   }
 
   people(cardId: string) {
     const compare = (a: string, b: string) => a.localeCompare(b, 'en', { sensitivity: 'base' })
     const split = (rows: { nickname: string; credit_visible: number }[]) => rows.filter((r) => r.credit_visible)
-    const interesting = this.db.prepare("SELECT u.nickname, u.credit_visible FROM reactions r JOIN users u ON u.id = r.user_id WHERE r.card_id = ? AND r.kind = 'interesting'").all(cardId) as { nickname: string; credit_visible: number }[]
-    const doubts = this.db.prepare("SELECT u.nickname, u.credit_visible, r.reason FROM reactions r JOIN users u ON u.id = r.user_id WHERE r.card_id = ? AND r.kind = 'doubt'").all(cardId) as { nickname: string; credit_visible: number; reason: string }[]
-    const looks = this.db.prepare('SELECT u.nickname, u.credit_visible FROM second_looks s JOIN users u ON u.id = s.user_id WHERE s.card_id = ?').all(cardId) as { nickname: string; credit_visible: number }[]
+    const interesting = this.q("SELECT u.nickname, u.credit_visible FROM reactions r JOIN users u ON u.id = r.user_id WHERE r.card_id = ? AND r.kind = 'interesting'").all(cardId) as { nickname: string; credit_visible: number }[]
+    const doubts = this.q("SELECT u.nickname, u.credit_visible, r.reason FROM reactions r JOIN users u ON u.id = r.user_id WHERE r.card_id = ? AND r.kind = 'doubt'").all(cardId) as { nickname: string; credit_visible: number; reason: string }[]
+    const looks = this.q('SELECT u.nickname, u.credit_visible FROM second_looks s JOIN users u ON u.id = s.user_id WHERE s.card_id = ?').all(cardId) as { nickname: string; credit_visible: number }[]
     const shownInteresting = split(interesting)
     const shownDoubts = doubts.filter((d) => d.credit_visible)
     const shownLooks = split(looks)
@@ -332,22 +364,25 @@ export class Findings {
   private popularity(): Map<string, number> {
     const now = this.now()
     const since = now - POPULAR_WINDOW_MS
-    const rows = this.db
-      .prepare(
-        `SELECT card_id, user_id, created_at, 3 AS weight FROM second_looks WHERE created_at >= @since
-         UNION ALL SELECT card_id, user_id, created_at, CASE kind WHEN 'doubt' THEN 2 ELSE 1 END AS weight FROM reactions WHERE created_at >= @since`,
+    const rows = this.q(
+        `SELECT a.card_id, a.user_id, a.created_at, a.weight, f.state FROM (
+           SELECT card_id, user_id, created_at, 3 AS weight FROM second_looks WHERE created_at >= @since
+           UNION ALL SELECT card_id, user_id, created_at, CASE kind WHEN 'doubt' THEN 2 ELSE 1 END AS weight FROM reactions WHERE created_at >= @since
+         ) a JOIN findings f ON f.card_id = a.card_id`,
       )
-      .all({ since }) as { card_id: string; user_id: string; created_at: number; weight: number }[]
+      .all({ since }) as { card_id: string; user_id: string; created_at: number; weight: number; state: FindingState }[]
+    const states = new Map<string, FindingState>()
     const best = new Map<string, Map<string, number>>()
     for (const r of rows) {
       const value = r.weight * 0.5 ** ((now - r.created_at) / POPULAR_HALF_LIFE_MS)
       const people = best.get(r.card_id) ?? new Map<string, number>()
       people.set(r.user_id, Math.max(people.get(r.user_id) ?? 0, value))
       best.set(r.card_id, people)
+      states.set(r.card_id, r.state)
     }
     const scores = new Map<string, number>()
     for (const [cardId, people] of best) {
-      const state = this.row(cardId)?.state
+      const state = states.get(cardId)
       if (!state) continue
       const sum = [...people.values()].reduce((a, b) => a + b, 0)
       scores.set(cardId, POPULAR_DISCOUNTED.includes(state) ? sum * POPULAR_DISCOUNT : sum)
@@ -356,11 +391,14 @@ export class Findings {
   }
 
   hasPopular(): boolean {
-    return this.popularity().size > 0
+    return !!this.q(
+      `SELECT 1 FROM findings f WHERE EXISTS (SELECT 1 FROM second_looks s WHERE s.card_id = f.card_id AND s.created_at >= @since)
+         OR EXISTS (SELECT 1 FROM reactions r WHERE r.card_id = f.card_id AND r.created_at >= @since) LIMIT 1`,
+    ).get({ since: this.now() - POPULAR_WINDOW_MS })
   }
 
   highlight(userId: string | null) {
-    const f = this.db.prepare("SELECT * FROM findings WHERE state = 'published' ORDER BY updated_at DESC, card_id LIMIT 1").get() as FindingRow | undefined
+    const f = this.q("SELECT * FROM findings WHERE state = 'published' ORDER BY updated_at DESC, card_id LIMIT 1").get() as FindingRow | undefined
     const card = f ? this.deps.card(f.card_id) : null
     return f && card ? this.summary(f, card, userId) : null
   }
@@ -402,7 +440,7 @@ export class Findings {
   }
 
   feed(cursor = 0, opts: { tab?: FeedTab; userId?: string | null } = {}) {
-    const rows = opts.tab === 'popular' ? this.popularRows(cursor) : (this.db.prepare('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[])
+    const rows = opts.tab === 'popular' ? this.popularRows(cursor) : (this.q('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[])
     const items = rows.slice(0, PAGE).flatMap((f) => {
       const card = this.deps.card(f.card_id)
       return card ? [this.summary(f, card, opts.userId ?? null)] : []
@@ -414,14 +452,15 @@ export class Findings {
     const f = this.row(cardId)
     const card = f ? this.deps.card(cardId) : null
     if (!f || !card) return null
-    const events = this.db.prepare('SELECT state, reason, source, url, data_version, created_at FROM finding_events WHERE card_id = ? ORDER BY id').all(cardId) as { state: string; reason: string | null; source: string; url: string | null; data_version: string; created_at: number }[]
+    const events = this.q('SELECT state, reason, source, url, data_version, created_at FROM finding_events WHERE card_id = ? ORDER BY id').all(cardId) as { state: string; reason: string | null; source: string; url: string | null; data_version: string; created_at: number }[]
     const credits = this.credits(f)
+    const checks = this.checkRows(cardId)
     return {
       ...this.summary(f, card, userId),
       fov_deg: card.fov_deg,
       offsets_s: card.offsets_s,
       checks: CHECK_SERVICES.map((service) => {
-        const c = this.checkRows(cardId).find((x) => x.service === service)
+        const c = checks.find((x) => x.service === service)
         return { service, result: c?.result ?? null, names: c ? (JSON.parse(c.names) as string[]) : [], note: c?.note ?? null, checked_at: c?.checked_at ?? null }
       }),
       events,
@@ -436,8 +475,7 @@ export class Findings {
   }
 
   eventsForAlerts(userId: string): { id: string; card_id: string; state: string; reason: string | null; created_at: number; followed: number }[] {
-    return this.db
-      .prepare(
+    return this.q(
         `SELECT 'finding:' || e.id AS id, e.card_id, e.state, e.reason, e.created_at, 0 AS followed FROM finding_events e
          WHERE e.example = 0 AND e.card_id IN (SELECT card_id FROM votes WHERE user_id = @user AND counted = 1)
          UNION ALL
@@ -461,8 +499,8 @@ export class Findings {
       if (!card) return
       const id = `${EXAMPLE_PREFIX}${card.id}`
       const at = now - i * 3_600_000
-      this.db.prepare('INSERT OR REPLACE INTO findings (card_id, state, reason, example, credits, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)').run(id, plan.state, plan.reason, JSON.stringify(['exemplo_a', 'exemplo_b', 'exemplo_c']), at, at)
-      this.db.prepare('INSERT INTO finding_events (card_id, state, reason, source, url, data_version, example, created_at) VALUES (?, ?, ?, ?, NULL, ?, 1, ?)').run(id, plan.state, plan.reason, 'example', this.deps.dataVersion, at)
+      this.q('INSERT OR REPLACE INTO findings (card_id, state, reason, example, credits, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)').run(id, plan.state, plan.reason, JSON.stringify(['exemplo_a', 'exemplo_b', 'exemplo_c']), at, at)
+      this.q('INSERT INTO finding_events (card_id, state, reason, source, url, data_version, example, created_at) VALUES (?, ?, ?, ?, NULL, ?, 1, ?)').run(id, plan.state, plan.reason, 'example', this.deps.dataVersion, at)
       for (const [service, result, names] of plan.checks) this.saveCheck(id, service, result, names, service === 'quality' ? 'no_flags_for_card' : 'example')
       made += 1
     })
@@ -470,15 +508,15 @@ export class Findings {
   }
 
   clearExamples(): number {
-    const ids = (this.db.prepare('SELECT card_id FROM findings WHERE example = 1').all() as { card_id: string }[]).map((r) => r.card_id)
+    const ids = (this.q('SELECT card_id FROM findings WHERE example = 1').all() as { card_id: string }[]).map((r) => r.card_id)
     this.db.transaction(() => {
       for (const id of ids) {
-        this.db.prepare('DELETE FROM finding_events WHERE card_id = ?').run(id)
-        this.db.prepare('DELETE FROM finding_checks WHERE card_id = ?').run(id)
-        this.db.prepare('DELETE FROM reactions WHERE card_id = ?').run(id)
-        this.db.prepare('DELETE FROM second_looks WHERE card_id = ?').run(id)
-        this.db.prepare('DELETE FROM finding_follows WHERE card_id = ?').run(id)
-        this.db.prepare('DELETE FROM findings WHERE card_id = ?').run(id)
+        this.q('DELETE FROM finding_events WHERE card_id = ?').run(id)
+        this.q('DELETE FROM finding_checks WHERE card_id = ?').run(id)
+        this.q('DELETE FROM reactions WHERE card_id = ?').run(id)
+        this.q('DELETE FROM second_looks WHERE card_id = ?').run(id)
+        this.q('DELETE FROM finding_follows WHERE card_id = ?').run(id)
+        this.q('DELETE FROM findings WHERE card_id = ?').run(id)
       }
     })()
     return ids.length

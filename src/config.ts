@@ -11,7 +11,11 @@ export interface Config {
   cacheDir: string
   cacheBytes: number
   avatarDir: string
+  logLevel: LogLevel
 }
+
+const LOG_LEVELS = ['error', 'warn', 'info', 'silent'] as const
+export type LogLevel = (typeof LOG_LEVELS)[number]
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
@@ -25,5 +29,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     cacheDir: env.SKYSWAP_CACHE_DIR ?? resolve(import.meta.dirname, '..', 'var', 'cutouts'),
     cacheBytes: Number(env.SKYSWAP_CACHE_MB ?? 512) * 1024 * 1024,
     avatarDir: env.SKYSWAP_AVATAR_DIR ?? resolve(import.meta.dirname, '..', 'var', 'avatars'),
+    logLevel: LOG_LEVELS.find((l) => l === env.SKYSWAP_LOG) ?? 'error',
   }
 }

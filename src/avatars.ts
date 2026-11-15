@@ -1,4 +1,4 @@
-import type { DB } from './db.js'
+import { prepared, type DB } from './db.js'
 
 export interface AvatarDto {
   id: string
@@ -59,7 +59,7 @@ export class Avatars {
   }
 
   ofUser(userId: string): AvatarDto | null {
-    const row = this.db.prepare(`SELECT ${COLUMNS} FROM avatars WHERE owner_id = ?`).get(userId) as Row | undefined
+    const row = prepared(this.db, `SELECT ${COLUMNS} FROM avatars WHERE owner_id = ?`).get(userId) as Row | undefined
     return row ? dto(row) : null
   }
 

@@ -201,6 +201,8 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE avatars ADD COLUMN retired INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE votes ADD COLUMN held_ms INTEGER;
    ALTER TABLE sky_cards ADD COLUMN thumb TEXT;`,
+  `ALTER TABLE card_issues ADD COLUMN shared INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE votes ADD COLUMN via TEXT;`,
 ]
 
 export function openDb(path: string): DB {

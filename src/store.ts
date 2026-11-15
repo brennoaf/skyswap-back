@@ -350,10 +350,19 @@ export class Store {
     return card
   }
 
-  issueCard(userId: string, cardId: string, guided = false): void {
+  issueCard(userId: string, cardId: string, guided = false, shared = false): void {
     this.db
-      .prepare('INSERT INTO card_issues (user_id, card_id, issued_at, guided) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET issued_at = excluded.issued_at, guided = excluded.guided')
-      .run(userId, cardId, this.now(), guided ? 1 : 0)
+      .prepare('INSERT INTO card_issues (user_id, card_id, issued_at, guided, shared) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET issued_at = excluded.issued_at, guided = excluded.guided, shared = excluded.shared')
+      .run(userId, cardId, this.now(), guided ? 1 : 0, shared ? 1 : 0)
+  }
+
+  sharedCard(userId: string, cardId: string): { card: DeckCard; answered: 'moves' | 'still' | 'glitch' | 'unsure' | null } | null {
+    const card = this.kit.deckById.get(cardId)
+    if (!card || EXAMPLE_IDS.has(cardId)) return null
+    const past = this.db.prepare('SELECT label, glitch FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { label: Label; glitch: number | null } | undefined
+    if (past) return { card, answered: past.glitch ? 'glitch' : past.label === 'real' ? 'moves' : past.label === 'artifact' ? 'still' : 'unsure' }
+    this.issueCard(userId, cardId, false, true)
+    return { card, answered: null }
   }
 
   guideLessons(userId: string): { lesson: 'moves' | 'still' | 'glitch'; card: DeckCard }[] {
@@ -387,6 +396,11 @@ export class Store {
     this.db.prepare('UPDATE card_issues SET issued_at = ? WHERE user_id = ? AND card_id = ?').run(this.now(), userId, cardId)
   }
 
+  private isShared(userId: string, cardId: string): boolean {
+    const row = this.db.prepare('SELECT shared FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { shared: number } | undefined
+    return row?.shared === 1
+  }
+
   private isGuided(userId: string, cardId: string): boolean {
     const row = this.db.prepare('SELECT guided FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { guided: number } | undefined
     return row?.guided === 1
@@ -410,12 +424,13 @@ export class Store {
     const heldMs = Math.min(elapsed, Math.max(0, meta.heldMs ?? 0))
     const ms = elapsed - heldMs
     const guided = this.isGuided(userId, cardId)
+    const shared = this.isShared(userId, cardId)
     const exposed = this.findings.isExposed(userId, cardId)
     const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : exposed ? { xp: 0, streakBonus: 0, streak: 0, reason: 'exposed' } : this.award(userId, 'vote', cardId, { ms })
     const counted = !guided && !exposed && xp.reason !== 'too_fast'
     this.db
-      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0, heldMs)
+      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0, heldMs, shared ? 'share' : null)
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     const gold = card?.gold ?? null
     let outcome = { gold, correct: null as boolean | null, bits: 0 }

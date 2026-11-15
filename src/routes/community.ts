@@ -2,6 +2,7 @@ import { Type, type FastifyPluginAsyncTypebox } from '@fastify/type-provider-typ
 import { requireUser, writeLimit } from '../app.js'
 import * as S from '../schemas.js'
 import { CHOICE_LABEL } from '../store.js'
+import { RETIRE_REAL_MIN } from '../swap.js'
 import type { RouteCtx } from './content.js'
 
 export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store }) => {
@@ -30,7 +31,7 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
     const userId = req.user?.id ?? null
     const highlight = store.findings.highlight(userId)
     if (userId && highlight) store.findings.expose(userId, [highlight.id], 'feed')
-    return { open_cards: store.openCards(userId), highlight, has_popular: store.findings.hasPopular() }
+    return { open_cards: store.openCards(userId), close_votes: RETIRE_REAL_MIN, highlight, has_popular: store.findings.hasPopular() }
   })
 
   const FindingParams = Type.Object({ id: Type.String({ maxLength: 120 }) })

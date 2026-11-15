@@ -230,6 +230,8 @@ export const VoteBody = Type.Object({
   hints: Type.Optional(Type.Boolean()),
 })
 
+export const SharedCardResponse = Type.Object({ card: DeckCardPublic, answered: Nullable(Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('glitch'), Type.Literal('unsure')])) }, { $id: 'SharedCardResponse' })
+
 export const CardShownBody = Type.Object({ card_id: Type.String({ maxLength: 64 }) })
 
 export const GlitchBody = Type.Object({ glitch: Nullable(Type.Boolean()) })
@@ -463,7 +465,7 @@ export const FindingDetail = Type.Object(
   { $id: 'FindingDetail' },
 )
 
-export const CommunityOverview = Type.Object({ open_cards: Type.Integer(), highlight: Nullable(FindingSummary), has_popular: Type.Boolean() }, { $id: 'CommunityOverview' })
+export const CommunityOverview = Type.Object({ open_cards: Type.Integer(), close_votes: Type.Integer(), highlight: Nullable(FindingSummary), has_popular: Type.Boolean() }, { $id: 'CommunityOverview' })
 
 export const FindingPeople = Type.Object(
   {

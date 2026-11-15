@@ -144,6 +144,7 @@ export interface AppPost {
   id: string
   object_id: string
   media_post: string
+  media_anim?: string
   created_at: string
   text_pt: string
   text_en: string
@@ -160,11 +161,14 @@ export interface AppAccount {
   posts: AppPost[]
 }
 
-function loadAppAccount(path: string, objects: ObjectSummary[], postsById: Map<string, Post>): AppAccount | null {
+function loadAppAccount(path: string, objects: ObjectSummary[], postsById: Map<string, Post>, objectsDir: string): AppAccount | null {
   if (!existsSync(path)) return null
   const raw = JSON.parse(readFileSync(path, 'utf8')) as { account: Omit<AppAccount, 'source_pt' | 'source_en' | 'posts'>; source_pt: string; source_en: string; posts: AppPost[] }
   const known = new Set(objects.map((o) => o.id))
-  const posts = raw.posts.filter((p) => known.has(p.object_id) && postsById.has(p.media_post)).sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))
+  const posts = raw.posts
+    .filter((p) => known.has(p.object_id) && postsById.has(p.media_post))
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))
+    .map((p) => (p.media_anim && !existsSync(join(objectsDir, p.object_id, p.media_anim)) ? { ...p, media_anim: undefined } : p))
   return { ...raw.account, kind: 'app', source_pt: raw.source_pt, source_en: raw.source_en, posts }
 }
 
@@ -220,7 +224,7 @@ export function loadKit(dataDir: string): Kit {
     deckById: new Map(deck.map((c) => [c.id, c])),
     wave: existsSync(wavePath) ? JSON.parse(readFileSync(wavePath, 'utf8')) : [],
     indexCells,
-    appAccount: loadAppAccount(join(dataDir, 'app_posts.json'), objects, new Map(posts.map((p) => [p.id, p]))),
+    appAccount: loadAppAccount(join(dataDir, 'app_posts.json'), objects, new Map(posts.map((p) => [p.id, p])), join(dataDir, 'objects')),
     index: { images: indexManifest.images ?? manifest.images_indexed, cell_bytes: cellBytes, photo_bytes: sizes(indexManifest.photos_index), until_mjd: untilMjd, generated_at: indexManifest.generated_at ?? null },
   }
 }

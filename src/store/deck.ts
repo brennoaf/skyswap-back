@@ -26,7 +26,7 @@ import type { DeckCard } from '../kit.js'
 import { normalizeName } from '../lib/text.js'
 import { cleanNote } from '../notes.js'
 import { applyVote, goldRate, MAX_VOTES, MIN_PHOTOS_TO_CONFIRM, SwapCard, SwapUser, type CardStatus, type Label } from '../swap.js'
-import { CHOICE_LABEL, HttpError, StorePart, type Choice, type NextSlot, type StoreContext, type VotePosition } from './base.js'
+import { CHOICE_LABEL, HttpError, mediaUrl, StorePart, type Choice, type NextSlot, type StoreContext, type VotePosition } from './base.js'
 import type { Xp } from './xp.js'
 import { steadyTrack, type StoredMark } from '../marks.js'
 
@@ -101,6 +101,7 @@ export class Deck extends StorePart {
       source: { pt: account.source_pt, en: account.source_en },
       object: objectCard(object),
       post: postDto(post),
+      anim: p.media_anim ? mediaUrl(p.object_id, p.media_anim) : null,
       thread: this.findings.comments.summary(p.id, userId),
       social: this.findings.social(p.id, userId),
     }

@@ -340,6 +340,10 @@ export class Store {
     })
   }
 
+  cardShown(userId: string, cardId: string): void {
+    this.db.prepare('UPDATE card_issues SET issued_at = ? WHERE user_id = ? AND card_id = ?').run(this.now(), userId, cardId)
+  }
+
   private isGuided(userId: string, cardId: string): boolean {
     const row = this.db.prepare('SELECT guided FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { guided: number } | undefined
     return row?.guided === 1
@@ -352,7 +356,7 @@ export class Store {
     return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
   }
 
-  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: { heldMs?: number } = {}) {
+  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: { heldMs?: number; hints?: boolean | null } = {}) {
     const card = this.kit.deckById.get(cardId)
     const sky = card ? undefined : this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
@@ -365,8 +369,8 @@ export class Store {
     const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : exposed ? { xp: 0, streakBonus: 0, streak: 0, reason: 'exposed' } : this.award(userId, 'vote', cardId, { ms })
     const counted = !guided && !exposed && xp.reason !== 'too_fast'
     this.db
-      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null)
+      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0)
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     const gold = card?.gold ?? null
     let outcome = { gold, correct: null as boolean | null, bits: 0 }

@@ -178,6 +178,7 @@ export const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL,
      PRIMARY KEY (user_id, card_id)
    );`,
+  `ALTER TABLE votes ADD COLUMN hints INTEGER;`,
 ]
 
 export function openDb(path: string): DB {

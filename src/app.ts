@@ -21,6 +21,7 @@ import { contentRoutes } from './routes/content.js'
 import { socialRoutes } from './routes/social.js'
 import { classifyRoutes } from './routes/classify.js'
 import { communityRoutes } from './routes/community.js'
+import { authRoutes } from './routes/auth.js'
 import { makeChecker } from './checks.js'
 import { AvatarRefill, type RefillOptions } from './avatar-refill.js'
 
@@ -134,6 +135,7 @@ export async function buildApp(deps: AppDeps) {
   await app.register(socialRoutes, ctx)
   await app.register(classifyRoutes, ctx)
   await app.register(communityRoutes, ctx)
+  await app.register(authRoutes, ctx)
 
   await app.ready()
   return { app, store, kit, db, cache, refill }

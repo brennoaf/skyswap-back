@@ -234,6 +234,46 @@ export const MIGRATIONS: string[] = [
    INSERT OR IGNORE INTO card_firsts (user_id, card_id, first_at) SELECT user_id, card_id, issued_at FROM card_issues;`,
   `ALTER TABLE votes ADD COLUMN positions TEXT;
    ALTER TABLE votes ADD COLUMN track_ok INTEGER;`,
+  `ALTER TABLE sessions ADD COLUMN id TEXT;
+   ALTER TABLE sessions ADD COLUMN device TEXT NOT NULL DEFAULT 'other:other';
+   ALTER TABLE sessions ADD COLUMN via TEXT NOT NULL DEFAULT 'nickname';
+   ALTER TABLE sessions ADD COLUMN last_seen INTEGER;
+   UPDATE sessions SET id = lower(hex(randomblob(9))), last_seen = created_at;
+   CREATE UNIQUE INDEX sessions_id ON sessions(id);
+   CREATE TABLE passkeys (
+     id TEXT PRIMARY KEY,
+     user_id TEXT NOT NULL REFERENCES users(id),
+     public_key BLOB NOT NULL,
+     counter INTEGER NOT NULL,
+     transports TEXT,
+     session_id TEXT,
+     created_at INTEGER NOT NULL,
+     last_used INTEGER
+   );
+   CREATE INDEX passkeys_user ON passkeys(user_id);
+   CREATE TABLE recovery_codes (
+     user_id TEXT PRIMARY KEY REFERENCES users(id),
+     code_hash TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );
+   CREATE TABLE device_links (
+     code_hash TEXT PRIMARY KEY,
+     poll_hash TEXT NOT NULL UNIQUE,
+     device TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL,
+     approved_by TEXT REFERENCES users(id),
+     approved_at INTEGER,
+     claimed_at INTEGER
+   );
+   CREATE INDEX device_links_expires ON device_links(expires_at);
+   CREATE TABLE auth_challenges (
+     id TEXT PRIMARY KEY,
+     purpose TEXT NOT NULL CHECK (purpose IN ('register', 'login')),
+     challenge TEXT NOT NULL,
+     user_id TEXT,
+     expires_at INTEGER NOT NULL
+   );`,
 ]
 
 const statements = new WeakMap<DB, Map<string, Database.Statement>>()

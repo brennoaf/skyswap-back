@@ -1,6 +1,7 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Type } from '@fastify/type-provider-typebox'
 import { requireUser, SESSION_COOKIE, writeLimit } from '../app.js'
+import { deviceOf } from '../device.js'
 import { objectCard } from '../dto.js'
 import type { ObjectSummary } from '../kit.js'
 import * as S from '../schemas.js'
@@ -15,7 +16,7 @@ export const socialRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { s
   app.get('/api/session', { schema: { tags: ['session'], response: { 200: S.SessionResponse } } }, async (req) => ({ user: req.user }))
 
   app.post('/api/session', { schema: { tags: ['session'], body: S.SessionBody, response: { 200: S.SessionResponse, 409: S.ErrorBody } }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const { user, token } = store.createUser(req.body.nickname, req.body.avatar_id)
+    const { user, token } = store.createUser(req.body.nickname, req.body.avatar_id, deviceOf(req.headers['user-agent']))
     reply.setCookie(SESSION_COOKIE, token, COOKIE_OPTS)
     return { user }
   })

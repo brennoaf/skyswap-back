@@ -44,6 +44,8 @@ const OUTCOME: Record<string, 'open' | 'moves' | 'still' | 'undecided'> = { open
 
 const MY_CARDS_PAGE = 30
 
+const CLEAN_STILL_CARD = '1a371e9941f4'
+
 export class HttpError extends Error {
   constructor(readonly statusCode: number, message: string) {
     super(message)
@@ -342,7 +344,7 @@ export class Store {
     const pick = (test: (c: DeckCard) => boolean, order: (a: DeckCard, b: DeckCard) => number) => this.kit.deck.filter((c) => test(c) && !seen.has(c.id)).sort(order)[0]
     const plan = [
       { lesson: 'moves' as const, card: pick((c) => c.kind === 'mover' && c.gold === 'real' && (c.marks?.length ?? 0) >= 2, (a, b) => a.n_frames - b.n_frames || jump(b) - jump(a)) },
-      { lesson: 'still' as const, card: pick((c) => c.kind === 'stationary' && c.gold === 'artifact', (a, b) => snr(b) - snr(a)) },
+      { lesson: 'still' as const, card: pick((c) => c.kind === 'residual' && c.gold === 'artifact', (a, b) => Number(b.id === CLEAN_STILL_CARD) - Number(a.id === CLEAN_STILL_CARD) || snr(b) - snr(a)) },
       { lesson: 'glitch' as const, card: pick((c) => c.kind === 'single' && c.gold === 'artifact', (a, b) => a.n_frames - b.n_frames || snr(b) - snr(a)) },
     ]
     return plan.flatMap((p) => {

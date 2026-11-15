@@ -178,6 +178,7 @@ export const SkyCardBody = Type.Object({
   fov_deg: Type.Number({ minimum: 0.05, maximum: 0.2 }),
   band: Type.String({ pattern: '^D[1-6]$' }),
   size_px: Type.Integer({ minimum: 8, maximum: 400 }),
+  thumb: Type.Optional(Type.String({ maxLength: 30000, pattern: '^data:image/jpeg;base64,[A-Za-z0-9+/=]+$' })),
   frames: Type.Array(
     Type.Object({ key: Type.String({ maxLength: 200 }), mjd: Type.Number({ minimum: 50000, maximum: 80000 }), wl_um: Type.Number({ minimum: 0.5, maximum: 6 }), visit: Type.Optional(Type.Integer({ minimum: 0, maximum: 15 })) }),
     { minItems: 2, maxItems: 12 },
@@ -495,7 +496,7 @@ export const FindingFollowBody = Type.Object({ on: Type.Boolean() }, { additiona
 
 export const MyCards = Type.Object(
   {
-    items: Type.Array(Type.Object({ card_id: Type.String(), label: Type.String(), created_at: Type.Number(), practice: Type.Boolean(), finding: Nullable(Type.String()), status: Type.String() })),
+    items: Type.Array(Type.Object({ card_id: Type.String(), label: Type.String(), created_at: Type.Number(), practice: Type.Boolean(), finding: Nullable(Type.String()), thumb: Nullable(Type.String()), thumb_cols: Type.Integer() })),
     next_cursor: Nullable(Type.Integer()),
   },
   { $id: 'MyCards' },

@@ -131,7 +131,9 @@ export class Store {
       const practice = this.isGuided(userId, v.card_id)
       const quiet = !v.counted || !!s?.gold
       const finding = practice || quiet ? null : this.findings.stateOf(v.card_id)
-      return { card_id: v.card_id, label: v.label, created_at: v.created_at, practice, finding, status: practice ? 'practice' : quiet ? 'answered' : (s?.status ?? 'open') }
+      const deck = this.kit.deckById.get(v.card_id)
+      const thumb = deck ? `/kit/deck/${deck.sprite.split('/').pop() ?? ''}` : ((this.db.prepare('SELECT thumb FROM sky_cards WHERE id = ?').get(v.card_id) as { thumb: string | null } | undefined)?.thumb ?? null)
+      return { card_id: v.card_id, label: v.label, created_at: v.created_at, practice, finding, thumb, thumb_cols: deck ? deck.n_frames : 0 }
     })
     return { items, next_cursor: rows.length > MY_CARDS_PAGE ? cursor + MY_CARDS_PAGE : null }
   }
@@ -167,7 +169,7 @@ export class Store {
     return this.deckCells.get(cardId) ?? this.skyCards.get(cardId)?.cell ?? null
   }
 
-  registerSkyCard(userId: string, input: { ra: number; dec: number; fov_deg: number; band: string; size_px: number; frames: SkyFrame[] }): SkyCard {
+  registerSkyCard(userId: string, input: { ra: number; dec: number; fov_deg: number; band: string; size_px: number; frames: SkyFrame[]; thumb?: string }): SkyCard {
     const ra = Math.round((((input.ra % 360) + 360) % 360) * 1e4) / 1e4
     const dec = Math.round(input.dec * 1e4) / 1e4
     const id = skyCardId(ra, dec, input.fov_deg, input.band)
@@ -182,6 +184,7 @@ export class Store {
       this.swapCards.set(id, new SwapCard(null))
     }
     if (!this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, id)) this.issueCard(userId, id)
+    if (input.thumb) this.db.prepare('UPDATE sky_cards SET thumb = ? WHERE id = ? AND thumb IS NULL').run(input.thumb, id)
     return card
   }
 
@@ -378,7 +381,7 @@ export class Store {
   private elapsedSinceIssue(userId: string, cardId: string): number {
     const issue = this.db.prepare('SELECT issued_at FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { issued_at: number } | undefined
     if (!issue) throw new HttpError(409, 'card_not_issued')
-    const last = this.db.prepare('SELECT MAX(created_at) AS t FROM votes WHERE user_id = ?').get(userId) as { t: number | null }
+    const last = this.db.prepare('SELECT MAX(created_at - COALESCE(held_ms, 0)) AS t FROM votes WHERE user_id = ?').get(userId) as { t: number | null }
     return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
   }
 
@@ -389,14 +392,16 @@ export class Store {
     if (position && (choice !== 'moves' || position.frame >= (card ? card.n_frames : skyVisits((sky as SkyCard).frames).length))) throw new HttpError(400, 'invalid_position')
     if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
     const label = CHOICE_LABEL[choice]
-    const ms = Math.max(0, this.elapsedSinceIssue(userId, cardId) - (meta.heldMs ?? 0))
+    const elapsed = this.elapsedSinceIssue(userId, cardId)
+    const heldMs = Math.min(elapsed, Math.max(0, meta.heldMs ?? 0))
+    const ms = elapsed - heldMs
     const guided = this.isGuided(userId, cardId)
     const exposed = this.findings.isExposed(userId, cardId)
     const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : exposed ? { xp: 0, streakBonus: 0, streak: 0, reason: 'exposed' } : this.award(userId, 'vote', cardId, { ms })
     const counted = !guided && !exposed && xp.reason !== 'too_fast'
     this.db
-      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0)
+      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0, heldMs)
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     const gold = card?.gold ?? null
     let outcome = { gold, correct: null as boolean | null, bits: 0 }

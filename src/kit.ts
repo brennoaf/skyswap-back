@@ -101,7 +101,15 @@ export interface DeckCard {
   size_px: number
   size_arcmin: number
   marks: { u: number; v: number }[] | null
-  wcs?: Record<string, unknown> | null
+  wcs?: CardWcs | null
+}
+
+export interface CardWcs {
+  ctype: [string, string]
+  crval: [number, number]
+  crpix: [number, number]
+  cd: [[number, number], [number, number]]
+  naxis: [number, number]
 }
 
 export interface Manifest {

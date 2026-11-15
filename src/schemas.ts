@@ -168,6 +168,10 @@ const deckCardFields = {
 
 export const DeckCardPublic = Type.Object(deckCardFields, { $id: 'DeckCard' })
 
+const pair = <T extends TSchema>(t: T) => Type.Array(t, { minItems: 2, maxItems: 2 })
+
+export const CardWcs = Type.Object({ ctype: pair(Type.String()), crval: pair(Type.Number()), crpix: pair(Type.Number()), cd: pair(pair(Type.Number())), naxis: pair(Type.Integer()) }, { $id: 'CardWcs' })
+
 export const SkySpot = Type.Object(
   {
     id: Type.String(),
@@ -486,7 +490,7 @@ export const FindingDetail = Type.Object(
           people: Type.Integer(),
           you: Type.Boolean(),
           size_px: Type.Integer(),
-          wcs: Nullable(Type.Record(Type.String(), Type.Unknown())),
+          wcs: Nullable(CardWcs),
           spot: Nullable(SkySpot),
           frames: Type.Array(Type.Object({ mjd: Type.Number(), points: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })), mine: Nullable(Type.Object({ u: Type.Number(), v: Type.Number() })) })),
         }),
@@ -527,7 +531,7 @@ export const FindingFollowBody = Type.Object({ on: Type.Boolean() }, { additiona
 
 export const MyCards = Type.Object(
   {
-    items: Type.Array(Type.Object({ card_id: Type.String(), label: Type.String(), created_at: Type.Number(), practice: Type.Boolean(), finding: Nullable(Type.String()), thumb: Nullable(Type.String()), thumb_cols: Type.Integer() })),
+    items: Type.Array(Type.Object({ card_id: Type.String(), label: Type.String(), created_at: Type.Number(), practice: Type.Boolean(), finding: Nullable(Type.String()), thumb: Nullable(Type.String()), thumb_cols: Type.Integer(), retired: Type.Boolean() })),
     next_cursor: Nullable(Type.Integer()),
   },
   { $id: 'MyCards' },

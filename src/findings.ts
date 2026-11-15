@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { CHECK_SERVICES, separationDeg, type Checker, type CheckOutcome, type CheckPoint, type CheckResult, type CheckService, type CheckTarget } from './checks.js'
 import { prepared, type DB } from './db.js'
 import type { SkySpot } from './explore.js'
+import type { CardWcs } from './kit.js'
 
 export const FINDING_STATES = ['candidate', 'known', 'likely_artifact', 'package_ready', 'in_review', 'published', 'discarded'] as const
 export type FindingState = (typeof FINDING_STATES)[number]
@@ -42,7 +43,7 @@ export interface FindingCard {
   offsets_s: number[]
   known: string | null
   size_px: number
-  wcs: Record<string, unknown> | null
+  wcs: CardWcs | null
 }
 
 export type CrowdMark = { user: string; frame: number; x: number; y: number }
@@ -408,9 +409,11 @@ export class Findings {
   }
 
   highlight(userId: string | null) {
-    const f = this.q("SELECT * FROM findings WHERE state = 'published' ORDER BY updated_at DESC, card_id LIMIT 1").get() as FindingRow | undefined
-    const card = f ? this.deps.card(f.card_id) : null
-    return f && card ? this.summary(f, card, userId) : null
+    for (const f of this.q("SELECT * FROM findings WHERE state = 'published' ORDER BY updated_at DESC, card_id").all() as FindingRow[]) {
+      const card = this.deps.card(f.card_id)
+      if (card) return this.summary(f, card, userId)
+    }
+    return null
   }
 
   private summary(f: FindingRow, card: FindingCard, userId: string | null) {

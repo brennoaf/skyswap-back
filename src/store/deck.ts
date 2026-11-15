@@ -37,7 +37,7 @@ const CLOCK_SLACK_MS = 120_000
 
 type VoteTiming = { heldMs?: number; thinkMs?: number; answeredAt?: number }
 
-const CLEAN_STILL_CARD = '1a371e9941f4'
+const CLEAN_STILL_CARD = '7d86b2dc7f97'
 const EXAMPLE_CARDS = [
   { example: 'still', id: 'f30fa0536263' },
   { example: 'moves', id: 'cc97c9bb4195' },
@@ -78,6 +78,11 @@ export class Deck extends StorePart {
 
   hasSkyCard(id: string): boolean {
     return this.skyCards.has(id)
+  }
+
+  inKit(cardId: string): boolean {
+    const id = cardId.startsWith(EXAMPLE_PREFIX) ? cardId.slice(EXAMPLE_PREFIX.length) : cardId
+    return this.kit.deckById.has(id) || this.skyCards.has(id)
   }
 
   findingCard(cardId: string): FindingCard | null {
@@ -145,7 +150,8 @@ export class Deck extends StorePart {
       const practice = v.practice === 1
       const quiet = !v.counted || !!this.swapCards.get(v.card_id)?.gold
       const deck = this.kit.deckById.get(v.card_id)
-      return { card_id: v.card_id, label: v.label, created_at: v.created_at, practice, finding: practice || quiet ? null : v.finding, thumb: deck ? `/kit/deck/${deck.sprite.split('/').pop() ?? ''}` : v.thumb, thumb_cols: deck ? deck.n_frames : 0 }
+      const retired = !deck && !this.skyCards.has(v.card_id)
+      return { card_id: v.card_id, label: v.label, created_at: v.created_at, practice, finding: practice || quiet || retired ? null : v.finding, thumb: deck ? `/kit/deck/${deck.sprite.split('/').pop() ?? ''}` : v.thumb, thumb_cols: deck ? deck.n_frames : 0, retired }
     })
     return { items, next_cursor: rows.length > MY_CARDS_PAGE ? (page[page.length - 1]?.id ?? null) : null }
   }
@@ -156,7 +162,7 @@ export class Deck extends StorePart {
     const choice: Choice = vote.label === 'real' ? 'moves' : vote.label === 'artifact' ? 'still' : 'unsure'
     const card = this.kit.deckById.get(cardId)
     const sky = this.skyCards.get(cardId)
-    if (!card && !sky) throw new HttpError(404, 'unknown_card')
+    if (!card && !sky) throw new HttpError(404, 'card_retired')
     const reveal = card ? this.reveal(card, null, choice) : this.skyReveal(sky as SkyCard, choice)
     return { label: vote.label, reveal: { ...reveal, control: null, marks: [] }, note: vote.note, note_editable: vote.label === 'real' && this.isFirstYes(userId, cardId) && !this.findings.stateOf(cardId) }
   }

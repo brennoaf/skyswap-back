@@ -132,8 +132,8 @@ export class Social extends StorePart {
       const status = s && !s.gold ? this.deck.cardStatus(v.card_id) : undefined
       if (status && status !== 'open' && status !== 'real') out.push({ id: `consensus:${v.card_id}:${status}`, type: 'consensus', ref: v.card_id, detail: status, created_at: v.created_at, read: false })
     }
-    for (const e of this.deck.findings.eventsForAlerts(userId)) out.push({ id: e.id, type: e.followed ? 'finding_followed' : 'finding', ref: e.card_id, detail: e.state, created_at: e.created_at, read: false })
-    for (const n of this.deck.findings.noteAlerts(userId)) out.push({ id: `note:${n.card_id}`, type: 'note', ref: n.card_id, detail: 'note', created_at: n.created_at, read: false })
+    for (const e of this.deck.findings.eventsForAlerts(userId)) if (this.deck.inKit(e.card_id)) out.push({ id: e.id, type: e.followed ? 'finding_followed' : 'finding', ref: e.card_id, detail: e.state, created_at: e.created_at, read: false })
+    for (const n of this.deck.findings.noteAlerts(userId)) if (this.deck.inKit(n.card_id)) out.push({ id: `note:${n.card_id}`, type: 'note', ref: n.card_id, detail: 'note', created_at: n.created_at, read: false })
     const badges = this.q('SELECT badge, created_at FROM badges WHERE user_id = ?').all(userId) as { badge: string; created_at: number }[]
     for (const b of badges) out.push({ id: `badge:${b.badge}`, type: 'badge', ref: b.badge, detail: b.badge, created_at: b.created_at, read: false })
     const level = levelFor(this.xp.totalXp(userId)).current

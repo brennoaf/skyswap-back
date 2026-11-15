@@ -45,6 +45,13 @@ const OUTCOME: Record<string, 'open' | 'moves' | 'still' | 'undecided'> = { open
 const MY_CARDS_PAGE = 30
 
 const CLEAN_STILL_CARD = '1a371e9941f4'
+const EXAMPLE_CARDS = [
+  { example: 'still', id: 'f30fa0536263' },
+  { example: 'moves', id: 'cc97c9bb4195' },
+  { example: 'particle', id: 'ba2c9d5325f4' },
+  { example: 'streak', id: '8e93269ec7ac' },
+] as const
+const EXAMPLE_IDS: ReadonlySet<string> = new Set(EXAMPLE_CARDS.map((e) => e.id))
 
 export class HttpError extends Error {
   constructor(readonly statusCode: number, message: string) {
@@ -301,7 +308,7 @@ export class Store {
     const seen = new Set([...this.seenCards(userId), ...(opts.not ?? [])])
     if (opts.open && this.openCards(userId) > 0) return { card: this.nextCard(userId, { seen }), sky: false, interesting: false }
     if (opts.explore && this.quietStreak(userId)) {
-      const mover = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id))
+      const mover = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id) && !EXAMPLE_IDS.has(c.id))
       const pick = mover[Math.floor(this.random() * mover.length)]
       if (pick) {
         this.issueCard(userId, pick.id)
@@ -325,7 +332,7 @@ export class Store {
     const gold: string[] = []
     const open: string[] = []
     for (const [id, c] of this.swapCards) {
-      if (seen.has(id) || !this.kit.deckById.has(id)) continue
+      if (seen.has(id) || !this.kit.deckById.has(id) || EXAMPLE_IDS.has(id)) continue
       if (c.gold) gold.push(id)
       else if (c.status === 'open') open.push(id)
     }
@@ -356,7 +363,7 @@ export class Store {
       return a && b ? Math.hypot(a.u - b.u, a.v - b.v) : 0
     }
     const snr = (c: DeckCard) => c.pipeline.snr ?? 0
-    const pick = (test: (c: DeckCard) => boolean, order: (a: DeckCard, b: DeckCard) => number) => this.kit.deck.filter((c) => test(c) && !seen.has(c.id)).sort(order)[0]
+    const pick = (test: (c: DeckCard) => boolean, order: (a: DeckCard, b: DeckCard) => number) => this.kit.deck.filter((c) => test(c) && !seen.has(c.id) && !EXAMPLE_IDS.has(c.id)).sort(order)[0]
     const plan = [
       { lesson: 'moves' as const, card: pick((c) => c.kind === 'mover' && c.gold === 'real' && (c.marks?.length ?? 0) >= 2, (a, b) => a.n_frames - b.n_frames || jump(b) - jump(a)) },
       { lesson: 'still' as const, card: pick((c) => c.kind === 'residual' && c.gold === 'artifact', (a, b) => Number(b.id === CLEAN_STILL_CARD) - Number(a.id === CLEAN_STILL_CARD) || snr(b) - snr(a)) },
@@ -366,6 +373,13 @@ export class Store {
       if (!p.card) return []
       this.issueCard(userId, p.card.id, true)
       return [{ lesson: p.lesson, card: p.card }]
+    })
+  }
+
+  guideExamples(): { example: (typeof EXAMPLE_CARDS)[number]['example']; card: DeckCard }[] {
+    return EXAMPLE_CARDS.flatMap((e) => {
+      const card = this.kit.deckById.get(e.id)
+      return card ? [{ example: e.example, card }] : []
     })
   }
 

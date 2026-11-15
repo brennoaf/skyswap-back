@@ -72,6 +72,9 @@ export const classifyRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, {
   app.get('/api/classify/guide', { schema: { tags: ['classify'], response: { 200: S.GuideResponse, 401: S.ErrorBody } } }, async (req, reply) => {
     const user = requireUser(req, reply)
     if (!user) return reply
-    return { lessons: store.guideLessons(user.id).map((l) => ({ lesson: l.lesson, card: publicCard(l.card), marks: l.lesson === 'still' ? [] : (l.card.marks ?? []) })) }
+    return {
+      lessons: store.guideLessons(user.id).map((l) => ({ lesson: l.lesson, card: publicCard(l.card), marks: l.lesson === 'still' ? [] : (l.card.marks ?? []) })),
+      examples: store.guideExamples().map((e) => ({ example: e.example, card: publicCard(e.card), marks: e.example === 'moves' ? (e.card.marks ?? []) : [] })),
+    }
   })
 }

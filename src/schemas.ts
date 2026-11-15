@@ -158,15 +158,14 @@ export const AvatarOffer = Type.Object({ avatars: Type.Array(AvatarDto) })
 
 export const AvatarBody = Type.Object({ avatar_id: Type.String({ maxLength: 40 }) })
 
-export const DeckCardPublic = Type.Object(
-  {
-    id: Type.String(),
-    sprite: Type.String(),
-    n_frames: Type.Integer(),
-    offsets_s: Type.Array(Type.Number()),
-  },
-  { $id: 'DeckCard' },
-)
+const deckCardFields = {
+  id: Type.String(),
+  sprite: Type.String(),
+  n_frames: Type.Integer(),
+  offsets_s: Type.Array(Type.Number()),
+}
+
+export const DeckCardPublic = Type.Object(deckCardFields, { $id: 'DeckCard' })
 
 export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic), sky: Type.Boolean(), interesting: Type.Boolean() }, { $id: 'NextCardResponse' })
 
@@ -235,7 +234,7 @@ export const CardShownBody = Type.Object({ card_id: Type.String({ maxLength: 64 
 
 export const GlitchBody = Type.Object({ glitch: Nullable(Type.Boolean()) })
 
-export const GuideResponse = Type.Object({ lessons: Type.Array(Type.Object({ lesson: Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('glitch')]), card: DeckCardPublic, marks: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })) })) }, { $id: 'GuideResponse' })
+export const GuideResponse = Type.Object({ lessons: Type.Array(Type.Object({ lesson: Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('glitch')]), card: DeckCardPublic, marks: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })) })), examples: Type.Array(Type.Object({ example: Type.Union([Type.Literal('still'), Type.Literal('moves'), Type.Literal('particle'), Type.Literal('streak')]), card: Type.Object(deckCardFields), marks: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })) })) }, { $id: 'GuideResponse' })
 
 export const Reveal = Type.Object(
   {

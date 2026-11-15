@@ -11,6 +11,7 @@ import { imagesAt, totalFileBytes } from '../sky.js'
 import { CubeReader, tileFor } from '../cube.js'
 import { midDate, movedAway, objectAt, SOLAR_SYSTEM_KINDS } from '../spectrum-target.js'
 import { DiskCache } from '../disk-cache.js'
+import { acceptsGzip, gzipped, shuffle, slimFits } from '../photo-pack.js'
 import type { IndexService } from '../index-service.js'
 import { HttpError, postsForObject, type Store } from '../store.js'
 import { buildStoryScreens } from '../stories.js'
@@ -45,6 +46,7 @@ export function cropFlags(span: Uint8Array, nrows: number, skip: number, h: numb
 
 type FeedTab = 'for_you' | 'following' | 'new' | 'targets'
 const STALE_ARCSEC = 3
+const CUTOUT_PARTS = ['IMAGE', 'FLAGS']
 const STORY_FINDS = 3
 export const HIPS_BASE = 'https://irsa.ipac.caltech.edu/data/hips/CDS/'
 export const HIPS_SURVEYS: Record<string, { path: string; maxOrder: number }> = {
@@ -362,18 +364,24 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       if (!config.online) return reply.status(503).send({ error: 'offline' })
       const size = req.query.size ?? 0.1
       try {
-        const { buf, hit } = await cached(DiskCache.keyOf('irsa', key, ra.toFixed(5), dec.toFixed(5), size), async () => {
+        const { buf, hit } = await cached(DiskCache.keyOf('irsa-slim', key, ra.toFixed(5), dec.toFixed(5), size), async () => {
           const ctrl = new AbortController()
           const timer = setTimeout(() => ctrl.abort(), 30000)
           try {
             const r = await fetchImpl(`https://irsa.ipac.caltech.edu/ibe/data/spherex/${key}?center=${ra},${dec}d&size=${size}`, { signal: ctrl.signal })
             if (!r.ok) throw new HttpError(502, 'irsa_failed')
-            return Buffer.from(await r.arrayBuffer())
+            const full = Buffer.from(await r.arrayBuffer())
+            try {
+              return slimFits(full, CUTOUT_PARTS)
+            } catch {
+              return full
+            }
           } finally {
             clearTimeout(timer)
           }
         })
-        return reply.header('content-type', 'application/fits').header('cache-control', 'public, max-age=604800').header('x-cache', hit ? 'hit' : 'miss').send(buf)
+        reply.header('content-type', 'application/fits').header('cache-control', 'public, max-age=604800').header('vary', 'accept-encoding').header('x-cache', hit ? 'hit' : 'miss')
+        return acceptsGzip(req.headers['accept-encoding']) ? reply.header('content-encoding', 'gzip').send(await gzipped(buf)) : reply.send(buf)
       } catch (err) {
         if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
         return reply.status(504).send({ error: 'irsa_timeout' })
@@ -394,6 +402,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
           h: Type.Integer({ minimum: 1, maximum: CROP_MAX_PX }),
           rice: Type.Optional(Type.String({ pattern: '^\\d{1,12},\\d{1,8},\\d{1,4},\\d{1,4}$' })),
           desc: Type.Optional(Type.String({ pattern: '^\\d{1,12},\\d{1,12}$' })),
+          pack: Type.Optional(Type.Literal('s')),
         }),
       },
       config: { rateLimit: { max: 1200, timeWindow: '1 minute' } },
@@ -443,7 +452,9 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
                 )
               return Buffer.concat(await Promise.all(planes))
             })
-        return reply.header('content-type', 'application/octet-stream').header('cache-control', 'public, max-age=604800, immutable').header('x-cache', res.hit ? 'hit' : 'miss').send(res.buf)
+        reply.header('content-type', 'application/octet-stream').header('cache-control', 'public, max-age=604800, immutable').header('vary', 'accept-encoding').header('x-cache', res.hit ? 'hit' : 'miss')
+        const body = req.query.pack === 's' ? shuffle(res.buf, w * h * 4) : res.buf
+        return acceptsGzip(req.headers['accept-encoding']) ? reply.header('content-encoding', 'gzip').send(await gzipped(body)) : reply.send(body)
       } catch (err) {
         if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
         return reply.status(504).send({ error: 's3_timeout' })

@@ -10,6 +10,7 @@ export interface Config {
   online: boolean
   cacheDir: string
   cacheBytes: number
+  indexWorker: boolean
   avatarDir: string
   logLevel: LogLevel
 }
@@ -28,6 +29,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     online: env.SKYSWAP_OFFLINE !== '1',
     cacheDir: env.SKYSWAP_CACHE_DIR ?? resolve(import.meta.dirname, '..', 'var', 'cutouts'),
     cacheBytes: Number(env.SKYSWAP_CACHE_MB ?? 512) * 1024 * 1024,
+    indexWorker: env.SKYSWAP_INDEX_WORKER ? env.SKYSWAP_INDEX_WORKER !== '0' : !env.VITEST,
     avatarDir: env.SKYSWAP_AVATAR_DIR ?? resolve(import.meta.dirname, '..', 'var', 'avatars'),
     logLevel: LOG_LEVELS.find((l) => l === env.SKYSWAP_LOG) ?? 'error',
   }

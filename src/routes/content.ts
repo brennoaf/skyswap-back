@@ -11,8 +11,9 @@ import { imagesAt, totalFileBytes } from '../sky.js'
 import { CubeReader, tileFor } from '../cube.js'
 import { midDate, movedAway, objectAt, SOLAR_SYSTEM_KINDS } from '../spectrum-target.js'
 import { DiskCache } from '../disk-cache.js'
-import { lookupPoint, sampleRows } from '../index-lookup.js'
+import type { IndexService } from '../index-service.js'
 import { HttpError, postsForObject, type Store } from '../store.js'
+import { riceDecodeRows } from '../vendor/rice.js'
 
 export interface RouteCtx {
   store: Store
@@ -20,10 +21,26 @@ export interface RouteCtx {
   config: Config
   fetchImpl: typeof fetch
   cache: DiskCache
+  index: IndexService
 }
 
 export const S3_BASE = 'https://nasa-irsa-spherex.s3.amazonaws.com/'
 export const S3_MAX_RANGE = 16 * 1024 * 1024
+export const DETECTOR_PX = 2040
+export const CROP_MAX_PX = 640
+
+export function cropColumns(rows: Buffer, h: number, x0: number, w: number, nx = DETECTOR_PX): Buffer {
+  const out = Buffer.allocUnsafe(h * w * 4)
+  for (let y = 0; y < h; y++) rows.copy(out, y * w * 4, (y * nx + x0) * 4, (y * nx + x0 + w) * 4)
+  return out
+}
+
+export function cropFlags(span: Uint8Array, nrows: number, skip: number, h: number, x0: number, w: number, nx = DETECTOR_PX): Buffer {
+  const all = (riceDecodeRows(span, nrows, nx) as { data: Int32Array }).data
+  const out = Buffer.allocUnsafe(h * w * 4)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out.writeInt32BE(all[(skip + y) * nx + x0 + x] as number, (y * w + x) * 4)
+  return out
+}
 
 type FeedTab = 'for_you' | 'following' | 'new' | 'targets'
 const STALE_ARCSEC = 3
@@ -56,7 +73,7 @@ function nearby(kit: Kit, ra: number, dec: number, radiusDeg: number, at: string
     .map((x) => ({ ...objectCard(x.o), separation_deg: x.sep }))
 }
 
-export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store, kit, config, fetchImpl, cache }) => {
+export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store, kit, config, fetchImpl, cache, index }) => {
   const inflight = new Map<string, Promise<Buffer>>()
   const cube = new CubeReader(fetchImpl, cache)
   const cached = async (key: string, load: () => Promise<Buffer>): Promise<{ buf: Buffer; hit: boolean }> => {
@@ -234,7 +251,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
     const { ra, dec } = req.query
     const fov = req.query.fov ?? 0.1
     const band = req.query.band ?? null
-    const res = await imagesAt(join(kit.dataDir, 'index'), kit.wave, ra, dec, { online: config.online, fetchImpl, afterMjd: kit.index.until_mjd })
+    const res = await imagesAt(join(kit.dataDir, 'index'), kit.wave, ra, dec, { online: config.online, fetchImpl, afterMjd: kit.index.until_mjd, ask: (q) => index.ask(q) })
     const images = band ? res.images.filter((i) => i.band === band) : res.images
     const bands: Record<string, number> = {}
     for (const i of res.images) bands[i.band] = (bands[i.band] ?? 0) + 1
@@ -311,9 +328,8 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
     },
     async (req) => {
       const { ra, dec, band, t1, t2 } = req.query
-      const q = await lookupPoint(join(kit.dataDir, 'index'), kit.wave, ra, dec, { band, t1, t2 })
-      const rows = sampleRows(q.hits, req.query.max ?? 400)
-      return { cell: q.cell, total: q.hits.length, sampled: rows.length < q.hits.length, rows }
+      const a = await index.ask({ indexDir: join(kit.dataDir, 'index'), ra, dec, band, t1, t2, max: req.query.max ?? 400 })
+      return { cell: a.cell, total: a.total, sampled: a.sampled, rows: a.rows }
     },
   )
 
@@ -352,6 +368,76 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       } catch (err) {
         if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
         return reply.status(504).send({ error: 'irsa_timeout' })
+      }
+    },
+  )
+
+  app.get(
+    '/api/crop/*',
+    {
+      schema: {
+        hide: true,
+        querystring: Type.Object({
+          off: Type.String({ pattern: '^\\d{1,12}(,\\d{1,12}){0,2}$' }),
+          x0: Type.Integer({ minimum: 0, maximum: DETECTOR_PX - 1 }),
+          y0: Type.Integer({ minimum: 0, maximum: DETECTOR_PX - 1 }),
+          w: Type.Integer({ minimum: 1, maximum: CROP_MAX_PX }),
+          h: Type.Integer({ minimum: 1, maximum: CROP_MAX_PX }),
+          rice: Type.Optional(Type.String({ pattern: '^\\d{1,12},\\d{1,8},\\d{1,4},\\d{1,4}$' })),
+          desc: Type.Optional(Type.String({ pattern: '^\\d{1,12},\\d{1,12}$' })),
+        }),
+      },
+      config: { rateLimit: { max: 1200, timeWindow: '1 minute' } },
+    },
+    async (req, reply) => {
+      const key = (req.params as { '*': string })['*']
+      if (!isSafeCutoutKey(key)) return reply.status(400).send({ error: 'invalid_key' })
+      const { x0, y0, w, h } = req.query
+      if (x0 + w > DETECTOR_PX || y0 + h > DETECTOR_PX) return reply.status(400).send({ error: 'outside_detector' })
+      const offs = req.query.off.split(',').map(Number)
+      const [riceStart, riceLen, riceRows, riceSkip] = (req.query.rice ?? '').split(',').map(Number) as [number, number, number, number]
+      const rice = req.query.rice !== undefined
+      if (rice && (riceLen < 1 || riceLen > S3_MAX_RANGE || riceRows > DETECTOR_PX || riceSkip + h > riceRows)) return reply.status(400).send({ error: 'invalid_rice' })
+      const [descStart, heapStart] = (req.query.desc ?? '').split(',').map(Number) as [number, number]
+      const desc = req.query.desc !== undefined && !rice
+      const ck = DiskCache.keyOf('crop', key, offs.join('.'), x0, y0, w, h, req.query.rice ?? '', req.query.desc ?? '')
+      const hit = await cache.get(ck)
+      if (!hit && !config.online) return reply.status(503).send({ error: 'offline' })
+      try {
+        const res = hit
+          ? { buf: hit, hit: true }
+          : await cached(ck, async () => {
+              const rowBytes = DETECTOR_PX * 4
+              const range = async (start: number, len: number) => {
+                const ctrl = new AbortController()
+                const timer = setTimeout(() => ctrl.abort(), 20000)
+                try {
+                  const r = await fetchImpl(S3_BASE + key, { headers: { Range: `bytes=${start}-${start + len - 1}` }, signal: ctrl.signal })
+                  if (r.status !== 206) throw new HttpError(502, 's3_failed')
+                  const got = Buffer.from(await r.arrayBuffer())
+                  if (got.length !== len) throw new HttpError(502, 's3_short_read')
+                  return got
+                } finally {
+                  clearTimeout(timer)
+                }
+              }
+              const planes = offs.map(async (off) => cropColumns(await range(off + y0 * rowBytes, h * rowBytes), h, x0, w))
+              if (rice) planes.push(range(riceStart, riceLen).then((span) => cropFlags(span, riceRows, riceSkip, h, x0, w)))
+              if (desc)
+                planes.push(
+                  range(descStart, h * 8).then(async (table) => {
+                    const first = table.readInt32BE(4)
+                    const len = table.readInt32BE((h - 1) * 8 + 4) + table.readInt32BE((h - 1) * 8) - first
+                    if (first < 0 || len < 1 || len > S3_MAX_RANGE) throw new HttpError(502, 's3_bad_table')
+                    return cropFlags(await range(heapStart + first, len), h, 0, h, x0, w)
+                  }),
+                )
+              return Buffer.concat(await Promise.all(planes))
+            })
+        return reply.header('content-type', 'application/octet-stream').header('cache-control', 'public, max-age=604800, immutable').header('x-cache', res.hit ? 'hit' : 'miss').send(res.buf)
+      } catch (err) {
+        if (err instanceof HttpError) return reply.status(err.statusCode).send({ error: err.message })
+        return reply.status(504).send({ error: 's3_timeout' })
       }
     },
   )

@@ -18,9 +18,12 @@ export type IndexRow = Record<string, unknown> & {
   lam?: number
 }
 
-export const TILE_ROWS_BUDGET = 200_000
+export const TILE_ROWS_BUDGET = Number(process.env.SKYSWAP_INDEX_ROWS ?? 120_000)
+export const POINT_ROWS_BUDGET = 40_000
 export const VISIT_GAP_DAYS = 30 / 1440
 export const PER_VISIT = 4
+export const RUN_VISITS = 4
+export const RUN_DAYS = 8 / 24
 
 type Wave = Record<number, unknown>
 type ReadFn = (path: string) => Promise<Buffer>
@@ -135,15 +138,48 @@ export function sampleRows(rows: IndexRow[], max: number): IndexRow[] {
     }
     const avg = size / capped.length
     const n = Math.max(2, Math.min(capped.length, Math.floor(quota / avg)))
-    const seen = new Set<number>()
-    for (let i = 0; i < n; i++) seen.add(Math.round((i * (capped.length - 1)) / (n - 1)))
-    for (const i of seen) out.push(...(capped[i] as IndexRow[]))
+    for (const i of blockStarts(capped.map(midMjd), n)) for (let k = i; k < Math.min(capped.length, i + RUN_VISITS); k++) out.push(...(capped[k] as IndexRow[]))
   }
-  return out.sort((a, b) => a.mjd - b.mjd)
+  return [...new Set(out)].sort((a, b) => a.mjd - b.mjd)
+}
+
+const midMjd = (v: IndexRow[]) => v.reduce((a, r) => a + r.mjd, 0) / Math.max(1, v.length)
+export function blockStarts(mids: number[], visitBudget: number): number[] {
+  const last = Math.max(0, mids.length - RUN_VISITS)
+  const blocks = Math.max(1, Math.floor(visitBudget / RUN_VISITS))
+  if (blocks === 1) return [tightStart(mids, 0, 0, last)]
+  const starts = new Set<number>()
+  const step = last / (blocks - 1)
+  for (let b = 0; b < blocks; b++) {
+    const target = Math.round(b * step)
+    const reach = Math.floor(step / 2)
+    starts.add(tightStart(mids, target, Math.max(0, target - reach), Math.min(last, target + reach)))
+  }
+  return [...starts]
+}
+
+function tightStart(mids: number[], target: number, lo: number, hi: number): number {
+  const tight = (i: number) => i + 2 < mids.length && (mids[i + 2] as number) - (mids[i] as number) <= RUN_DAYS
+  for (let d = 0; target - d >= lo || target + d <= hi; d++) {
+    if (target - d >= lo && tight(target - d)) return target - d
+    if (target + d <= hi && tight(target + d)) return target + d
+  }
+  return target
 }
 
 const POINTS_KEPT = 32
 const points = new Map<string, { cell: number; hits: IndexRow[] }>()
+
+function trimPoints(keep: string): void {
+  let total = 0
+  for (const p of points.values()) total += p.hits.length
+  for (const [key, p] of points) {
+    if (points.size <= POINTS_KEPT && total <= POINT_ROWS_BUDGET) break
+    if (key === keep) continue
+    points.delete(key)
+    total -= p.hits.length
+  }
+}
 
 export async function lookupPoint(indexDir: string, wave: unknown, ra: number, dec: number, f: { band?: string | null; t1?: number | null; t2?: number | null } = {}, cache = tileRows) {
   const cell = ang2pixNest(5, ra, dec) as number
@@ -156,12 +192,48 @@ export async function lookupPoint(indexDir: string, wave: unknown, ra: number, d
     const rows = await cache.load(indexDir, cell)
     all = { cell, hits: rows ? pointRows(rows, wave, ra, dec) : [] }
     points.set(key, all)
-    while (points.size > POINTS_KEPT) {
-      const oldest = points.keys().next().value
-      if (oldest === undefined) break
-      points.delete(oldest)
-    }
+    trimPoints(key)
   }
   const hits = all.hits.filter((r) => (!f.band || r.band === f.band) && (f.t1 == null || r.mjd >= f.t1) && (f.t2 == null || r.mjd <= f.t2))
   return { cell, hits }
+}
+
+export interface PointQuery {
+  indexDir: string
+  ra: number
+  dec: number
+  band?: string | null
+  t1?: number | null
+  t2?: number | null
+  max?: number | null
+  pick?: string[] | null
+}
+
+export interface PointAnswer {
+  cell: number
+  total: number
+  sampled: boolean
+  rows: IndexRow[]
+}
+
+const waves = new Map<string, Promise<unknown>>()
+
+function waveOf(indexDir: string): Promise<unknown> {
+  let p = waves.get(indexDir)
+  if (!p) {
+    p = readFile(join(indexDir, 'wave.json'), 'utf8').then(
+      (t) => JSON.parse(t) as unknown,
+      () => [],
+    )
+    waves.set(indexDir, p)
+  }
+  return p
+}
+
+export async function answerPoint(q: PointQuery, wave?: unknown): Promise<PointAnswer> {
+  const { cell, hits } = await lookupPoint(q.indexDir, wave ?? (await waveOf(q.indexDir)), q.ra, q.dec, { band: q.band, t1: q.t1, t2: q.t2 })
+  const kept = q.max ? sampleRows(hits, q.max) : hits
+  const pick = q.pick
+  const rows = pick ? kept.map((r) => Object.fromEntries(pick.map((k) => [k, r[k]])) as IndexRow) : kept
+  return { cell, total: hits.length, sampled: kept.length < hits.length, rows }
 }

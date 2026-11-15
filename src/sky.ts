@@ -1,4 +1,6 @@
-import { lookupPoint } from './index-lookup.js'
+import { answerPoint, type PointAnswer, type PointQuery } from './index-lookup.js'
+
+const IMAGE_FIELDS = ['key', 'release', 'band', 'mjd', 'lam', 'lam_min', 'lam_max', 'obsid', 'dqa', 'file_size']
 
 export interface SkyImage {
   key: string
@@ -43,9 +45,10 @@ export function mjdToIso(mjd: number): string {
   return new Date((mjd - 40587) * 86400000).toISOString()
 }
 
-export async function imagesFromFragment(indexDir: string, wave: unknown, ra: number, dec: number): Promise<{ cell: number; images: SkyImage[] }> {
-  const q = await lookupPoint(indexDir, wave, ra, dec)
-  const images = (q.hits as unknown as TileHit[])
+export async function imagesFromFragment(indexDir: string, wave: unknown, ra: number, dec: number, ask?: (q: PointQuery) => Promise<PointAnswer>): Promise<{ cell: number; images: SkyImage[] }> {
+  const query = { indexDir, ra, dec, pick: IMAGE_FIELDS }
+  const q = ask ? await ask(query) : await answerPoint(query, wave)
+  const images = (q.rows as unknown as TileHit[])
     .filter((h) => !h.dqa || h.dqa === 'Pass')
     .map((h) => ({
       key: h.key,
@@ -164,8 +167,8 @@ export const SIA_TTL_MS = 6 * 3_600_000
 export const SIA_EMPTY_TTL_MS = 5 * 60_000
 export const siaCache = new LruCache<string, { images: SkyImage[]; expires: number }>(SIA_CACHE_MAX)
 
-export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch; afterMjd?: number | null; now?: () => number }): Promise<SkyResult> {
-  const frag = await imagesFromFragment(indexDir, wave, ra, dec)
+export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch; afterMjd?: number | null; now?: () => number; ask?: (q: PointQuery) => Promise<PointAnswer> }): Promise<SkyResult> {
+  const frag = await imagesFromFragment(indexDir, wave, ra, dec, opts.ask)
   if (frag.images.length) return { source: 'fragment', cell: frag.cell, images: frag.images, incomplete: false }
   if (!opts.online) return { source: 'none', cell: frag.cell, images: [], incomplete: true }
   const now = (opts.now ?? Date.now)()

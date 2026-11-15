@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import type { Config } from './config.js'
 import { openDb, type DB } from './db.js'
 import { DiskCache } from './disk-cache.js'
+import { IndexService } from './index-service.js'
 import { loadKit, type Kit } from './kit.js'
 import { clampTzOffset } from './gamification.js'
 import { HttpError, Store, type User } from './store.js'
@@ -113,7 +114,8 @@ export async function buildApp(deps: AppDeps) {
   })
 
   const cache = deps.cache ?? new DiskCache(config.cacheDir, config.cacheBytes)
-  const ctx = { store, kit, config, fetchImpl: deps.fetchImpl ?? fetch, cache }
+  const index = new IndexService(config.indexWorker)
+  const ctx = { store, kit, config, fetchImpl: deps.fetchImpl ?? fetch, cache, index }
   store.findings.attachChecker(makeChecker(ctx.fetchImpl, config.online))
   store.findings.retryDue()
   const retry = setInterval(() => store.findings.retryDue(), CHECK_RETRY_MS)
@@ -121,6 +123,7 @@ export async function buildApp(deps: AppDeps) {
   const refill = new AvatarRefill(store.avatars, config.avatarDir, ctx.fetchImpl, deps.refill)
   app.addHook('onClose', async () => {
     clearInterval(retry)
+    await index.close()
     await refill.stop()
     await store.findings.drain()
   })

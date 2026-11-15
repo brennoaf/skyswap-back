@@ -241,6 +241,8 @@ export const VoteBody = Type.Object({
   glitch: Type.Optional(Nullable(Type.Boolean())),
   position: Type.Optional(Type.Object({ frame: Type.Integer({ minimum: 0, maximum: 64 }), x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }) }, { additionalProperties: false })),
   held_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000 })),
+  think_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000 })),
+  answered_at: Type.Optional(Type.Integer({ minimum: 0 })),
   hints: Type.Optional(Type.Boolean()),
 })
 

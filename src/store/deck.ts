@@ -32,6 +32,9 @@ const OUTCOME: Record<string, 'open' | 'moves' | 'still' | 'undecided'> = { open
 type Gold = 'real' | 'artifact'
 
 const MY_CARDS_PAGE = 30
+const CLOCK_SLACK_MS = 300_000
+
+type VoteTiming = { heldMs?: number; thinkMs?: number; answeredAt?: number }
 
 const CLEAN_STILL_CARD = '1a371e9941f4'
 const EXAMPLE_CARDS = [
@@ -182,6 +185,7 @@ export class Deck extends StorePart {
     const id = skyCardId(ra, dec, input.fov_deg, input.band)
     let card = this.skyCards.get(id)
     if (!card) {
+      if (skyVisits(input.frames).length < MIN_PHOTOS_TO_CONFIRM) throw new HttpError(400, 'need_three_visits')
       const frames = [...input.frames].sort((a, b) => a.mjd - b.mjd)
       card = { id, ra, dec, fov_deg: input.fov_deg, band: input.band, cell: ang2pixNest(EXPLORE_ORDER, ra, dec), size_px: input.size_px, frames, created_at: this.now() }
       this.q('INSERT OR IGNORE INTO sky_cards (id, ra, dec, fov_deg, band, cell, size_px, frames, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -215,7 +219,7 @@ export class Deck extends StorePart {
     else this.candidateSky.delete(id)
     const card = this.skyCards.get(id)
     const mjds = card ? card.frames.map((f) => f.mjd) : []
-    const again = open && Math.max(...mjds) - Math.min(...mjds) <= SKY_REVISIT_MAX_SPAN_DAYS
+    const again = open && !!card && skyVisits(card.frames).length >= MIN_PHOTOS_TO_CONFIRM && Math.max(...mjds) - Math.min(...mjds) <= SKY_REVISIT_MAX_SPAN_DAYS
     if (again && s.nReal > 0) this.hotSky.add(id)
     else this.hotSky.delete(id)
     this.quietSky.delete(id)
@@ -405,7 +409,20 @@ export class Deck extends StorePart {
     return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
   }
 
-  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: { heldMs?: number; hints?: boolean | null } = {}) {
+  private lookTime(userId: string, cardId: string, meta: VoteTiming): { ms: number; heldMs: number; answeredAt: number | null } {
+    if (meta.thinkMs === undefined || meta.answeredAt === undefined) {
+      const elapsed = this.elapsedSinceIssue(userId, cardId)
+      const heldMs = Math.min(elapsed, Math.max(0, meta.heldMs ?? 0))
+      return { ms: elapsed - heldMs, heldMs, answeredAt: null }
+    }
+    if (!this.q('SELECT 1 FROM card_issues WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'card_not_issued')
+    const answeredAt = Math.min(meta.answeredAt, this.now() + CLOCK_SLACK_MS)
+    const before = this.q('SELECT MAX(answered_at) AS t FROM votes WHERE user_id = ? AND answered_at < ?').get(userId, answeredAt) as { t: number | null }
+    const gap = before.t === null ? Infinity : answeredAt - before.t
+    return { ms: Math.max(0, Math.min(meta.thinkMs, gap)), heldMs: Math.max(0, meta.heldMs ?? 0), answeredAt }
+  }
+
+  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: VoteTiming & { hints?: boolean | null } = {}) {
     const card = this.kit.deckById.get(cardId)
     const sky = card ? undefined : this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
@@ -413,16 +430,14 @@ export class Deck extends StorePart {
     const label = CHOICE_LABEL[choice]
     const { xp, counted, guided, first, newBadges } = this.db.transaction(() => {
       if (this.q('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
-      const elapsed = this.elapsedSinceIssue(userId, cardId)
-      const heldMs = Math.min(elapsed, Math.max(0, meta.heldMs ?? 0))
-      const ms = elapsed - heldMs
+      const { ms, heldMs, answeredAt } = this.lookTime(userId, cardId, meta)
       const guided = this.isGuided(userId, cardId)
       const shared = this.isShared(userId, cardId)
       const exposed = this.findings.isExposed(userId, cardId)
       const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : exposed ? { xp: 0, streakBonus: 0, streak: 0, reason: 'exposed' } : this.xp.award(userId, 'vote', cardId, { ms })
       const counted = !guided && !exposed && xp.reason !== 'too_fast'
       const none = !this.q("SELECT 1 FROM votes WHERE card_id = ? AND counted = 1 AND label = 'real'").get(cardId)
-      this.q('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via, practice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      this.q('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via, practice, answered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
         userId,
         cardId,
         label,
@@ -436,6 +451,7 @@ export class Deck extends StorePart {
         heldMs,
         shared ? 'share' : null,
         guided ? 1 : 0,
+        answeredAt,
       )
       this.q('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
       const newBadges: BadgeKey[] = []

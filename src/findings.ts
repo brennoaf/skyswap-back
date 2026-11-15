@@ -408,6 +408,14 @@ export class Findings {
     ).get({ since: this.now() - POPULAR_WINDOW_MS })
   }
 
+  unseen(userId: string | null, limit: number): string[] {
+    const rows = this.q("SELECT card_id FROM findings WHERE state NOT IN ('likely_artifact', 'discarded') ORDER BY updated_at DESC, card_id").all() as { card_id: string }[]
+    return rows
+      .map((r) => r.card_id)
+      .filter((id) => !!this.deps.card(id) && !(userId && this.isExposed(userId, id)))
+      .slice(0, limit)
+  }
+
   highlight(userId: string | null) {
     for (const f of this.q("SELECT * FROM findings WHERE state = 'published' ORDER BY updated_at DESC, card_id").all() as FindingRow[]) {
       const card = this.deps.card(f.card_id)

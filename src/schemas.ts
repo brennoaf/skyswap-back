@@ -79,16 +79,38 @@ export const FeedResponse = Type.Object(
   { $id: 'FeedResponse' },
 )
 
-export const Story = Type.Object(
-  {
-    object: ObjectCard,
-    post_id: Nullable(Type.String()),
-    frames: Type.Array(Type.Object({ src: Type.String(), t: Type.String(), band: Type.String(), telescope: Nullable(Type.String()) })),
-  },
-  { $id: 'Story' },
+const StoryMark = Nullable(Type.Object({ x: Type.Number(), y: Type.Number() }))
+
+export const StoryScreen = Type.Union(
+  [
+    Type.Object({
+      kind: Type.Literal('blink'),
+      topic: Type.Union([Type.Literal('years'), Type.Literal('passes'), Type.Literal('night'), Type.Literal('brightness')]),
+      band: Nullable(Type.String()),
+      wavelength_um: Nullable(Type.Number()),
+      fixed: Type.Boolean(),
+      frames: Type.Array(Type.Object({ src: Type.String(), t: Type.String(), telescope: Nullable(Type.String()), mark: StoryMark })),
+    }),
+    Type.Object({ kind: Type.Literal('still'), topic: Type.Literal('difference'), band: Nullable(Type.String()), src: Type.String(), hours: Nullable(Type.Number()) }),
+    Type.Object({ kind: Type.Literal('curve'), band: Type.String(), saturated: Type.Boolean(), points: Type.Array(Type.Object({ t: Type.String(), mag: Type.Number(), err: Type.Number() })) }),
+    Type.Object({
+      kind: Type.Literal('colours'),
+      frames: Type.Array(Type.Object({ band: Type.String(), src: Type.String(), um: Nullable(Type.Array(Type.Number())), mark: StoryMark })),
+      signal: Type.Array(Nullable(Type.Number())),
+    }),
+    Type.Object({
+      kind: Type.Literal('end'),
+      motion: Nullable(Type.Object({ measured_arcsec: Type.Number(), err_arcsec: Type.Number(), predicted_arcsec: Type.Number(), days: Type.Number() })),
+      images: Type.Integer(),
+      passes: Type.Integer(),
+    }),
+  ],
+  { $id: 'StoryScreen' },
 )
 
-export const StoriesResponse = Type.Object({ stories: Type.Array(Story) }, { $id: 'StoriesResponse' })
+export const Story = Type.Object({ object: ObjectCard, screens: Type.Array(StoryScreen) }, { $id: 'Story' })
+
+export const StoriesResponse = Type.Object({ stories: Type.Array(Story), finds: Type.Array(Type.String()) }, { $id: 'StoriesResponse' })
 
 export const ObjectProfileDto = Type.Object(
   {

@@ -13,6 +13,7 @@ import { midDate, movedAway, objectAt, SOLAR_SYSTEM_KINDS } from '../spectrum-ta
 import { DiskCache } from '../disk-cache.js'
 import type { IndexService } from '../index-service.js'
 import { HttpError, postsForObject, type Store } from '../store.js'
+import { buildStoryScreens } from '../stories.js'
 import { riceDecodeRows } from '../vendor/rice.js'
 
 export interface RouteCtx {
@@ -44,6 +45,7 @@ export function cropFlags(span: Uint8Array, nrows: number, skip: number, h: numb
 
 type FeedTab = 'for_you' | 'following' | 'new' | 'targets'
 const STALE_ARCSEC = 3
+const STORY_FINDS = 3
 export const CUTOUT_KEY = /^(qr[23]|dr1)\/level2\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\.fits$/
 
 export function isSafeCutoutKey(key: string): boolean {
@@ -145,13 +147,12 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
     },
   )
 
-  app.get('/api/stories', { schema: { tags: ['feed'], response: { 200: S.StoriesResponse } } }, async () => ({
-    stories: orderedObjects(kit).map((o) => {
-      const posts = postsForObject(kit, o.id)
-      const post = posts.find((p) => p.type === 'long_baseline' && p.frames.length) ?? posts.find((p) => p.type === 'timelapse' && p.frames.length) ?? posts.find((p) => p.frames.length)
-      const dto = post ? postDto(post) : null
-      return { object: objectCard(o), post_id: post?.id ?? null, frames: (dto?.frames ?? []).map((f) => ({ src: f.src, t: f.t, band: f.band, telescope: f.telescope })) }
-    }),
+  const storyScreens = new Map(kit.objects.map((o) => [o.id, buildStoryScreens(kit, o.id)]))
+  app.get('/api/stories', { schema: { tags: ['feed'], response: { 200: S.StoriesResponse } } }, async (req) => ({
+    stories: orderedObjects(kit)
+      .map((o) => ({ object: objectCard(o), screens: storyScreens.get(o.id) ?? [] }))
+      .filter((s) => s.screens.length > 1),
+    finds: store.findings.unseen(req.user?.id ?? null, STORY_FINDS),
   }))
 
   app.get('/api/objects', { schema: { tags: ['objects'], response: { 200: S.ObjectsResponse } } }, async () => ({ objects: orderedObjects(kit).map(objectCard) }))

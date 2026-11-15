@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import type { Avatars } from './avatars.js'
@@ -23,7 +23,6 @@ const TRIES_PER_IMAGE = 30
 const REQUEST_TIMEOUT_MS = 180_000
 const PACE_MS = 1000
 const IDLE_MS = 10 * 60_000
-const EXHAUSTED_MS = 6 * 60 * 60_000
 const FIRST_BACKOFF_MS = 60_000
 const MAX_BACKOFF_MS = 60 * 60_000
 
@@ -230,7 +229,8 @@ export class AvatarRefill {
   private readonly paceMs: number
   private readonly target: number
   private readonly low: number
-  private readonly tried = new Set<string>()
+  private readonly rejected: Set<string>
+  private readonly rejectedPath: string
   private queue: NasaItem[] = []
   private pages: { query: string; page: number }[] | null = null
   private filling = false
@@ -249,6 +249,8 @@ export class AvatarRefill {
     this.paceMs = options.paceMs ?? PACE_MS
     this.target = options.target ?? STOCK_TARGET
     this.low = options.low ?? STOCK_LOW
+    this.rejectedPath = `${dir}.rejected.txt`
+    this.rejected = new Set(existsSync(this.rejectedPath) ? readFileSync(this.rejectedPath, 'utf8').split('\n').filter(Boolean) : [])
   }
 
   start(): void {
@@ -289,9 +291,9 @@ export class AvatarRefill {
       const item = await this.nextItem()
       if (!item) {
         this.report('exhausted')
-        this.tried.clear()
+        this.filling = false
         this.pages = null
-        return EXHAUSTED_MS
+        return IDLE_MS
       }
       await this.addFrom(item)
       this.backoff = 0
@@ -345,7 +347,7 @@ export class AvatarRefill {
     for (;;) {
       const item = this.queue.pop()
       if (item) {
-        if (!this.tried.has(item.nasa_id) && !this.avatars.inStock(item.nasa_id, item.title ?? '')) return item
+        if (!this.rejected.has(item.nasa_id) && !this.avatars.inStock(item.nasa_id, item.title ?? '')) return item
         continue
       }
       if (!this.pages.length) return null
@@ -403,7 +405,7 @@ export class AvatarRefill {
   private async addFrom(item: NasaItem): Promise<void> {
     try {
       const asset = await this.json<{ collection: { items: { href: string }[] } }>(`${ASSET_URL}/${encodeURIComponent(item.nasa_id)}`)
-      await this.cropFrom(item, asset.collection.items.map((i) => i.href))
+      if (await this.cropFrom(item, asset.collection.items.map((i) => i.href))) return
     } catch (err) {
       if (err instanceof NasaUnavailable) {
         this.queue.unshift(item)
@@ -411,10 +413,11 @@ export class AvatarRefill {
       }
       this.stats.unreadable++
     }
-    this.tried.add(item.nasa_id)
+    this.rejected.add(item.nasa_id)
+    appendFileSync(this.rejectedPath, `${item.nasa_id}\n`)
   }
 
-  private async cropFrom(item: NasaItem, hrefs: string[]): Promise<void> {
+  private async cropFrom(item: NasaItem, hrefs: string[]): Promise<boolean> {
     const { files, whole } = pickFiles(hrefs)
     let source: Buffer | null = null
     for (const file of files) {
@@ -423,13 +426,13 @@ export class AvatarRefill {
     }
     if (!source || !whole) {
       this.stats.unreadable++
-      return
+      return false
     }
     this.stats.images++
     const { width, height } = await sharp(source, { limitInputPixels: MAX_PIXELS, failOn: 'error' }).metadata()
     if (Math.min(width, height) < MIN_SHORT_SIDE) {
       this.stats.small++
-      return
+      return false
     }
     for (let i = 0; i < TRIES_PER_IMAGE; i++) {
       const spot = drawSpot(width, height, this.random)
@@ -438,9 +441,10 @@ export class AvatarRefill {
       if (!goodCrop(cropMetrics(rgb))) continue
       this.stats.passed++
       await this.store(item, whole, width, height, spot, rgb)
-      return
+      return true
     }
     this.stats.noCrop++
+    return false
   }
 
   private async store(item: NasaItem, whole: string, width: number, height: number, spot: Spot, rgb: Buffer): Promise<void> {

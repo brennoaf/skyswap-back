@@ -3,6 +3,7 @@ import { CHECK_SERVICES, separationDeg, type Checker, type CheckOutcome, type Ch
 import { prepared, type DB } from './db.js'
 import type { SkySpot } from './explore.js'
 import type { CardWcs } from './kit.js'
+import type { AppPostItemT } from './schemas.js'
 
 export const FINDING_STATES = ['candidate', 'known', 'likely_artifact', 'package_ready', 'in_review', 'published', 'discarded'] as const
 export type FindingState = (typeof FINDING_STATES)[number]
@@ -61,8 +62,12 @@ export interface FindingDeps {
   spot: (cardId: string) => SkySpot | null
   objectFor: (name: string) => string | null
   hasThumb: (cardId: string) => boolean
+  appPosts: () => { id: string; at: number }[]
+  appItem: (id: string, userId: string | null) => AppFeedItem | null
   dataVersion: string
 }
+
+export type AppFeedItem = AppPostItemT
 
 interface FindingRow {
   card_id: string
@@ -376,16 +381,30 @@ export class Findings {
     }
   }
 
+  isAppPost(id: string): boolean {
+    return this.deps.appPosts().some((p) => p.id === id)
+  }
+
+  private appReactions(since: number): { card_id: string; user_id: string; created_at: number; weight: number; state: FindingState }[] {
+    const ids = this.deps.appPosts().map((p) => p.id)
+    if (!ids.length) return []
+    const rows = this.q(
+      `SELECT card_id, user_id, created_at, CASE kind WHEN 'doubt' THEN 2 ELSE 1 END AS weight FROM reactions WHERE created_at >= ? AND card_id IN (${ids.map(() => '?').join(', ')})`,
+    ).all(since, ...ids) as { card_id: string; user_id: string; created_at: number; weight: number }[]
+    return rows.map((r) => ({ ...r, state: 'known' as FindingState }))
+  }
+
   private popularity(): Map<string, number> {
     const now = this.now()
     const since = now - POPULAR_WINDOW_MS
-    const rows = this.q(
+    const found = this.q(
         `SELECT a.card_id, a.user_id, a.created_at, a.weight, f.state FROM (
            SELECT card_id, user_id, created_at, 3 AS weight FROM second_looks WHERE created_at >= @since
            UNION ALL SELECT card_id, user_id, created_at, CASE kind WHEN 'doubt' THEN 2 ELSE 1 END AS weight FROM reactions WHERE created_at >= @since
          ) a JOIN findings f ON f.card_id = a.card_id`,
       )
       .all({ since }) as { card_id: string; user_id: string; created_at: number; weight: number; state: FindingState }[]
+    const rows = [...found, ...this.appReactions(since)]
     const states = new Map<string, FindingState>()
     const best = new Map<string, Map<string, number>>()
     for (const r of rows) {
@@ -406,6 +425,7 @@ export class Findings {
   }
 
   hasPopular(): boolean {
+    if (this.appReactions(this.now() - POPULAR_WINDOW_MS).length) return true
     return !!this.q(
       `SELECT 1 FROM findings f WHERE EXISTS (SELECT 1 FROM second_looks s WHERE s.card_id = f.card_id AND s.created_at >= @since)
          OR EXISTS (SELECT 1 FROM reactions r WHERE r.card_id = f.card_id AND r.created_at >= @since) LIMIT 1`,
@@ -428,7 +448,7 @@ export class Findings {
     return null
   }
 
-  private summary(f: FindingRow, card: FindingCard, userId: string | null) {
+  summary(f: FindingRow, card: FindingCard, userId: string | null) {
     const checks = this.checkRows(f.card_id)
     const credits = this.credits(f)
     const times = card.mjds.map((m) => new Date((m - 40587) * 86_400_000).toISOString())
@@ -475,26 +495,40 @@ export class Findings {
     return rows.find((r) => this.deps.objectFor(r.reason) === objectId && this.deps.card(r.card_id))?.card_id ?? null
   }
 
-  private popularRows(cursor: number): FindingRow[] {
+  private popularIds(): string[] {
     const scores = this.popularity()
-    const ids = [...scores.keys()].sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0) || a.localeCompare(b))
-    return ids.slice(cursor, cursor + PAGE + 1).flatMap((id) => {
-      const f = this.row(id)
-      return f ? [f] : []
-    })
+    return [...scores.keys()].sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0) || a.localeCompare(b))
+  }
+
+  private solvedIds(): string[] {
+    const rows = this.q(`SELECT card_id, updated_at FROM findings WHERE state IN (${SOLVED_STATES.map(() => '?').join(', ')})`).all(...SOLVED_STATES) as { card_id: string; updated_at: number }[]
+    const all = [...rows.map((r) => ({ id: r.card_id, at: r.updated_at })), ...this.deps.appPosts()]
+    return all.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id)).map((r) => r.id)
+  }
+
+  private itemFor(id: string, userId: string | null): (AppFeedItem | ReturnType<Findings['summary']>)[] {
+    if (this.isAppPost(id)) {
+      const item = this.deps.appItem(id, userId)
+      return item ? [item] : []
+    }
+    const f = this.row(id)
+    const card = f ? this.deps.card(id) : null
+    return f && card ? [this.summary(f, card, userId)] : []
   }
 
   feed(cursor = 0, opts: { tab?: FeedTab; userId?: string | null } = {}) {
-    const states = opts.tab === 'open' ? OPEN_STATES : opts.tab === 'solved' ? SOLVED_STATES : null
+    const userId = opts.userId ?? null
+    if (opts.tab === 'popular' || opts.tab === 'solved') {
+      const ids = (opts.tab === 'popular' ? this.popularIds() : this.solvedIds()).slice(cursor, cursor + PAGE + 1)
+      return { items: ids.slice(0, PAGE).flatMap((id) => this.itemFor(id, userId)), next_cursor: ids.length > PAGE ? cursor + PAGE : null }
+    }
     const rows =
-      opts.tab === 'popular'
-        ? this.popularRows(cursor)
-        : states
-          ? (this.q(`SELECT * FROM findings WHERE state IN (${states.map(() => '?').join(', ')}) ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?`).all(...states, PAGE + 1, cursor) as FindingRow[])
-          : (this.q('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[])
+      opts.tab === 'open'
+        ? (this.q(`SELECT * FROM findings WHERE state IN (${OPEN_STATES.map(() => '?').join(', ')}) ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?`).all(...OPEN_STATES, PAGE + 1, cursor) as FindingRow[])
+        : (this.q('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[])
     const items = rows.slice(0, PAGE).flatMap((f) => {
       const card = this.deps.card(f.card_id)
-      return card ? [this.summary(f, card, opts.userId ?? null)] : []
+      return card ? [this.summary(f, card, userId)] : []
     })
     return { items, next_cursor: rows.length > PAGE ? cursor + PAGE : null }
   }

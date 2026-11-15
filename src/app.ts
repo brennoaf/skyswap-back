@@ -79,7 +79,7 @@ export async function buildApp(deps: AppDeps) {
   })
   await app.register(swaggerUi, { routePrefix: '/docs' })
 
-  for (const schema of [S.CardWcs, S.SkySpot, S.FindingSummary, S.CommunityFeed, S.FindingDetail, S.MyCards, S.CreditResponse, S.ErrorBody, S.ObjectCard, S.FrameDto, S.TagSummary, S.PostDto, S.FeedItem, S.XpDto, S.UserDto, S.Reveal, S.DeckCardPublic, S.SpotDto]) app.addSchema(schema)
+  for (const schema of [S.CardWcs, S.SkySpot, S.FindingSummary, S.FindingDetail, S.MyCards, S.CreditResponse, S.ErrorBody, S.ObjectCard, S.FrameDto, S.TagSummary, S.PostDto, S.FeedItem, S.CommunityFeed, S.XpDto, S.UserDto, S.Reveal, S.DeckCardPublic, S.SpotDto]) app.addSchema(schema)
 
   app.decorateRequest('user', null)
   app.addHook('onRequest', async (req) => {

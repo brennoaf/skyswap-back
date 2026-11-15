@@ -11,8 +11,17 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
     { schema: { tags: ['community'], querystring: Type.Object({ tab: Type.Optional(Type.Union([Type.Literal('new'), Type.Literal('popular'), Type.Literal('open'), Type.Literal('solved')])), cursor: Type.Optional(Type.Integer({ minimum: 0 })) }), response: { 200: S.CommunityFeed } } },
     async (req) => {
       const page = store.findings.feed(req.query.cursor ?? 0, { tab: req.query.tab ?? 'new', userId: req.user?.id ?? null })
-      if (req.user) store.findings.expose(req.user.id, page.items.map((i) => i.id), 'feed')
+      if (req.user) store.findings.expose(req.user.id, page.items.flatMap((i) => ('type' in i && i.type === 'app' ? [] : [i.id])), 'feed')
       return page
+    },
+  )
+
+  app.get(
+    '/api/accounts/:handle',
+    { schema: { tags: ['community'], params: Type.Object({ handle: Type.String({ maxLength: 40 }) }), response: { 200: S.AccountPage, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      const page = store.appAccountPage(req.params.handle, req.user?.id ?? null)
+      return page ?? reply.status(404).send({ error: 'unknown_account' })
     },
   )
 
@@ -54,10 +63,12 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
       const user = requireUser(req, reply)
       if (!user) return reply
       const { id } = req.params
-      if (!store.findings.stateOf(id)) return reply.status(404).send({ error: 'unknown_finding' })
+      const app = store.findings.isAppPost(id)
+      if (!app && !store.findings.stateOf(id)) return reply.status(404).send({ error: 'unknown_finding' })
       const { kind, on, reason, position } = req.body
+      if (app && kind !== 'interesting') return reply.status(400).send({ error: 'interesting_only' })
       if (kind === 'doubt' && on && !reason) return reply.status(400).send({ error: 'reason_required' })
-      store.findings.expose(user.id, [id], 'link')
+      if (!app) store.findings.expose(user.id, [id], 'link')
       store.findings.setReaction(user.id, id, kind, on, reason ?? null, position ?? null)
       return store.findings.social(id, user.id)
     },

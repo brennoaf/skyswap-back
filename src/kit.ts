@@ -137,6 +137,35 @@ export interface Kit {
   wave: unknown
   indexCells: number[]
   index: { images: number; cell_bytes: Map<number, number>; photo_bytes: Map<number, number>; until_mjd: number | null; generated_at: string | null }
+  appAccount: AppAccount | null
+}
+
+export interface AppPost {
+  id: string
+  object_id: string
+  media_post: string
+  created_at: string
+  text_pt: string
+  text_en: string
+}
+
+export interface AppAccount {
+  handle: string
+  name: string
+  kind: 'app'
+  bio_pt: string
+  bio_en: string
+  source_pt: string
+  source_en: string
+  posts: AppPost[]
+}
+
+function loadAppAccount(path: string, objects: ObjectSummary[], postsById: Map<string, Post>): AppAccount | null {
+  if (!existsSync(path)) return null
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as { account: Omit<AppAccount, 'source_pt' | 'source_en' | 'posts'>; source_pt: string; source_en: string; posts: AppPost[] }
+  const known = new Set(objects.map((o) => o.id))
+  const posts = raw.posts.filter((p) => known.has(p.object_id) && postsById.has(p.media_post)).sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))
+  return { ...raw.account, kind: 'app', source_pt: raw.source_pt, source_en: raw.source_en, posts }
 }
 
 export function orderPosts(posts: Post[]): Post[] {
@@ -191,6 +220,7 @@ export function loadKit(dataDir: string): Kit {
     deckById: new Map(deck.map((c) => [c.id, c])),
     wave: existsSync(wavePath) ? JSON.parse(readFileSync(wavePath, 'utf8')) : [],
     indexCells,
+    appAccount: loadAppAccount(join(dataDir, 'app_posts.json'), objects, new Map(posts.map((p) => [p.id, p]))),
     index: { images: indexManifest.images ?? manifest.images_indexed, cell_bytes: cellBytes, photo_bytes: sizes(indexManifest.photos_index), until_mjd: untilMjd, generated_at: indexManifest.generated_at ?? null },
   }
 }

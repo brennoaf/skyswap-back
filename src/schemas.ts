@@ -530,7 +530,15 @@ export const FindingSummary = Type.Object(
   { $id: 'FindingSummary' },
 )
 
-export const CommunityFeed = Type.Object({ items: Type.Array(FindingSummary), next_cursor: Nullable(Type.Integer()) }, { $id: 'CommunityFeed' })
+const Localized = Type.Object({ pt: Type.String(), en: Type.String() })
+export const AppAccountRef = Type.Object({ handle: Type.String(), name: Type.String(), kind: Type.Literal('app') }, { $id: 'AppAccountRef' })
+export const AppPostItem = Type.Object(
+  { type: Type.Literal('app'), id: Type.String(), account: AppAccountRef, created_at: Type.String(), text: Localized, source: Localized, object: ObjectCard, post: PostDto, social: Type.Object(FindingSocial.properties) },
+  { $id: 'AppPostItem' },
+)
+export type AppPostItemT = Static<typeof AppPostItem>
+export const AccountPage = Type.Object({ account: Type.Object({ handle: Type.String(), name: Type.String(), kind: Type.Literal('app'), bio: Localized }), posts: Type.Array(AppPostItem) }, { $id: 'AccountPage' })
+export const CommunityFeed = Type.Object({ items: Type.Array(Type.Union([FindingSummary, AppPostItem])), next_cursor: Nullable(Type.Integer()) }, { $id: 'CommunityFeed' })
 
 export const FindingDetail = Type.Object(
   {

@@ -21,6 +21,7 @@ import {
 } from '../explore.js'
 import type { BadgeKey, XpResult } from '../gamification.js'
 import { ang2pixNest } from '../healpix.js'
+import { objectCard, postDto } from '../dto.js'
 import type { DeckCard } from '../kit.js'
 import { normalizeName } from '../lib/text.js'
 import { cleanNote } from '../notes.js'
@@ -74,9 +75,39 @@ export class Deck extends StorePart {
       },
       objectFor: (name) => this.objectIdFor(name),
       hasThumb: (id) => this.skyCards.has(id) && !!this.skyThumb(id),
+      appPosts: () => (this.kit.appAccount?.posts ?? []).map((p) => ({ id: p.id, at: Date.parse(p.created_at) })),
+      appItem: (id, userId) => this.appItem(id, userId),
       dataVersion: this.kit.manifest?.version ?? 'unknown',
     })
     this.findings.syncAll(this.swapCards.keys())
+  }
+
+  appItem(id: string, userId: string | null) {
+    const account = this.kit.appAccount
+    const p = account?.posts.find((x) => x.id === id)
+    const post = p ? this.kit.postsById.get(p.media_post) : undefined
+    const object = p ? this.kit.objects.find((o) => o.id === p.object_id) : undefined
+    if (!account || !p || !post || !object) return null
+    return {
+      type: 'app' as const,
+      id: p.id,
+      account: { handle: account.handle, name: account.name, kind: account.kind },
+      created_at: p.created_at,
+      text: { pt: p.text_pt, en: p.text_en },
+      source: { pt: account.source_pt, en: account.source_en },
+      object: objectCard(object),
+      post: postDto(post),
+      social: this.findings.social(p.id, userId),
+    }
+  }
+
+  appAccountPage(handle: string, userId: string | null) {
+    const account = this.kit.appAccount
+    if (!account || account.handle !== handle) return null
+    return {
+      account: { handle: account.handle, name: account.name, kind: account.kind, bio: { pt: account.bio_pt, en: account.bio_en } },
+      posts: account.posts.flatMap((p) => this.appItem(p.id, userId) ?? []),
+    }
   }
 
   hasSkyCard(id: string): boolean {

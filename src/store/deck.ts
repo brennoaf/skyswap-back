@@ -237,8 +237,8 @@ export class Deck extends StorePart {
     if (status === 'real') this.candidateSky.add(id)
     else this.candidateSky.delete(id)
     const card = this.skyCards.get(id)
-    const mjds = card ? card.frames.map((f) => f.mjd) : []
-    const again = open && !!card && skyVisits(card.frames).length >= MIN_PHOTOS_TO_CONFIRM && Math.max(...mjds) - Math.min(...mjds) <= SKY_REVISIT_MAX_SPAN_DAYS
+    const visits = card ? skyVisits(card.frames) : []
+    const again = open && visits.length >= MIN_PHOTOS_TO_CONFIRM && (visits[visits.length - 1]?.mjd ?? 0) - (visits[0]?.mjd ?? 0) <= SKY_REVISIT_MAX_SPAN_DAYS
     if (again && s.nReal > 0) this.hotSky.add(id)
     else this.hotSky.delete(id)
     this.quietSky.delete(id)

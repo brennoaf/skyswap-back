@@ -44,7 +44,7 @@ export function cropFlags(span: Uint8Array, nrows: number, skip: number, h: numb
 
 type FeedTab = 'for_you' | 'following' | 'new' | 'targets'
 const STALE_ARCSEC = 3
-export const CUTOUT_KEY = /^qr[23]\/level2\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\.fits$/
+export const CUTOUT_KEY = /^(qr[23]|dr1)\/level2\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)*\.fits$/
 
 export function isSafeCutoutKey(key: string): boolean {
   return !key.includes('..') && !key.includes('\\') && !key.includes('//') && CUTOUT_KEY.test(key)

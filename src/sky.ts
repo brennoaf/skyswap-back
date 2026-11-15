@@ -75,7 +75,7 @@ export function parseVotable(xml: string): Record<string, string>[] {
   return rows
 }
 
-const SIA_COLLECTIONS = ['spherex_qr3', 'spherex_qr3_deep', 'spherex_qr2', 'spherex_qr2_deep']
+const SIA_COLLECTIONS =['spherex_dr1', 'spherex_dr1_deep', 'spherex_qr3', 'spherex_qr3_deep']
 
 export async function imagesFromSia(ra: number, dec: number, fetchImpl: typeof fetch = fetch): Promise<SiaAnswer> {
   const all: SkyImage[] = []

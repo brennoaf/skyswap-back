@@ -391,6 +391,32 @@ export const SkyQuery = Type.Object({
   band: Type.Optional(Type.String({ pattern: '^D[1-6]$' })),
 })
 
+export const PointChannel = Type.Object({
+  band: Type.String(),
+  wavelength_um: Type.Number(),
+  wl_min_um: Type.Number(),
+  wl_max_um: Type.Number(),
+  value: Nullable(Type.Number()),
+  hits: Type.Integer(),
+  state: Type.Union([Type.Literal('ok'), Type.Literal('blank'), Type.Literal('empty'), Type.Literal('flagged')]),
+  bright: Type.Boolean(),
+})
+
+export const PointSpectrum = Type.Object(
+  {
+    ra: Type.Number(),
+    dec: Type.Number(),
+    tile: Type.Integer(),
+    pixel: pair(Type.Number()),
+    pixel_arcsec: Type.Number(),
+    date_beg: Nullable(Type.String()),
+    date_end: Nullable(Type.String()),
+    bright: Type.Boolean(),
+    channels: Type.Array(PointChannel),
+  },
+  { $id: 'PointSpectrum' },
+)
+
 export const SkyResponse = Type.Object(
   {
     ra: Type.Number(),

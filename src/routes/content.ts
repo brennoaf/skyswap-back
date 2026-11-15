@@ -8,6 +8,7 @@ import { angularSeparationDeg, epochYear, findObjectsByName, propagatePosition, 
 import { parseCoordinates, resolveName } from '../resolve.js'
 import * as S from '../schemas.js'
 import { imagesAt, totalFileBytes } from '../sky.js'
+import { CubeReader } from '../cube.js'
 import { DiskCache } from '../disk-cache.js'
 import { lookupPoint, sampleRows } from '../index-lookup.js'
 import { HttpError, postsForObject, type Store } from '../store.js'
@@ -56,6 +57,7 @@ function nearby(kit: Kit, ra: number, dec: number, radiusDeg: number, at: string
 
 export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store, kit, config, fetchImpl, cache }) => {
   const inflight = new Map<string, Promise<Buffer>>()
+  const cube = new CubeReader(fetchImpl, cache)
   const cached = async (key: string, load: () => Promise<Buffer>): Promise<{ buf: Buffer; hit: boolean }> => {
     const hit = await cache.get(key)
     if (hit) return { buf: hit, hit: true }
@@ -252,6 +254,28 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       total_file_bytes: totalFileBytes(images),
     }
   })
+
+  app.get(
+    '/api/sky/spectrum',
+    {
+      schema: {
+        tags: ['sky'],
+        summary: 'All 102 SPHEREx colours at one sky point, read from the IRSA DR1 all-sky cube (a quick look, not a measurement)',
+        querystring: Type.Object({ ra: Type.Number({ minimum: 0, maximum: 360 }), dec: Type.Number({ minimum: -90, maximum: 90 }) }),
+        response: { 200: S.PointSpectrum, 502: S.ErrorBody, 503: S.ErrorBody },
+      },
+      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+    },
+    async (req, reply) => {
+      if (!config.online) return reply.status(503).send({ error: 'offline' })
+      try {
+        const out = await cube.point(req.query.ra, req.query.dec)
+        return reply.header('cache-control', 'public, max-age=86400').send(out)
+      } catch {
+        return reply.status(502).send({ error: 'cube_failed' })
+      }
+    },
+  )
 
   app.get(
     '/api/index/at',

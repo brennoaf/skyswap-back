@@ -183,6 +183,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
         },
         measurements: Object.fromEntries(Object.entries(p.measurements ?? {}).map(([k, v]) => [k, base + v])),
         stats: { posts: postsForObject(kit, p.id).length, passes: p.n_passes, followers: store.followers(p.id) },
+        finding: store.findings.forObject(p.id),
         following: store.isFollowing(req.user?.id ?? null, p.id),
       }
     },

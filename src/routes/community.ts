@@ -8,7 +8,7 @@ import type { RouteCtx } from './content.js'
 export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store }) => {
   app.get(
     '/api/community/feed',
-    { schema: { tags: ['community'], querystring: Type.Object({ tab: Type.Optional(Type.Union([Type.Literal('new'), Type.Literal('popular')])), cursor: Type.Optional(Type.Integer({ minimum: 0 })) }), response: { 200: S.CommunityFeed } } },
+    { schema: { tags: ['community'], querystring: Type.Object({ tab: Type.Optional(Type.Union([Type.Literal('new'), Type.Literal('popular'), Type.Literal('open'), Type.Literal('solved')])), cursor: Type.Optional(Type.Integer({ minimum: 0 })) }), response: { 200: S.CommunityFeed } } },
     async (req) => {
       const page = store.findings.feed(req.query.cursor ?? 0, { tab: req.query.tab ?? 'new', userId: req.user?.id ?? null })
       if (req.user) store.findings.expose(req.user.id, page.items.map((i) => i.id), 'feed')
@@ -26,6 +26,12 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
       return finding
     },
   )
+
+  app.get('/api/community/findings/:id/photo', { schema: { hide: true, params: Type.Object({ id: Type.String({ maxLength: 120 }) }) } }, async (req, reply) => {
+    const photo = store.skyThumb(req.params.id)
+    if (!photo) return reply.status(404).send({ error: 'no_photo' })
+    return reply.header('content-type', 'image/jpeg').header('cache-control', 'public, max-age=86400').send(photo)
+  })
 
   app.get('/api/community/overview', { schema: { tags: ['community'], response: { 200: S.CommunityOverview } } }, async (req) => {
     const userId = req.user?.id ?? null

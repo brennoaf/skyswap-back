@@ -22,6 +22,7 @@ import {
 import type { BadgeKey, XpResult } from '../gamification.js'
 import { ang2pixNest } from '../healpix.js'
 import type { DeckCard } from '../kit.js'
+import { normalizeName } from '../lib/text.js'
 import { cleanNote } from '../notes.js'
 import { applyVote, goldRate, MAX_VOTES, MIN_PHOTOS_TO_CONFIRM, SwapCard, SwapUser, type CardStatus, type Label } from '../swap.js'
 import { CHOICE_LABEL, HttpError, StorePart, type Choice, type NextSlot, type StoreContext, type VotePosition } from './base.js'
@@ -71,6 +72,8 @@ export class Deck extends StorePart {
         const sky = this.skyCards.get(id)
         return sky ? skySpot(sky) : null
       },
+      objectFor: (name) => this.objectIdFor(name),
+      hasThumb: (id) => this.skyCards.has(id) && !!this.skyThumb(id),
       dataVersion: this.kit.manifest?.version ?? 'unknown',
     })
     this.findings.syncAll(this.swapCards.keys())
@@ -602,6 +605,18 @@ export class Deck extends StorePart {
 
   private knownObject(name: string) {
     return this.kit.objects.find((o) => o.name === name || o.name.startsWith(`${name} `) || o.aliases.includes(name)) ?? null
+  }
+
+  objectIdFor(name: string): string | null {
+    const q = normalizeName(name)
+    if (!q) return null
+    return this.kit.objects.find((o) => [o.id, o.name, o.handle, ...o.aliases].some((n) => normalizeName(n) === q))?.id ?? null
+  }
+
+  skyThumb(cardId: string): Buffer | null {
+    const row = this.q('SELECT thumb FROM sky_cards WHERE id = ?').get(cardId) as { thumb: string | null } | undefined
+    const m = /^data:image\/jpeg;base64,(.+)$/.exec(row?.thumb ?? '')
+    return m?.[1] ? Buffer.from(m[1], 'base64') : null
   }
 
   private knownName(name: string): string {

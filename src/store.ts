@@ -105,6 +105,14 @@ export class Store {
     return this.deck.seedExampleFindings(...args)
   }
 
+  skyThumb(cardId: string) {
+    return this.deck.skyThumb(cardId)
+  }
+
+  objectIdFor(name: string) {
+    return this.deck.objectIdFor(name)
+  }
+
   myCards(...args: Parameters<Deck['myCards']>) {
     return this.deck.myCards(...args)
   }

@@ -147,6 +147,7 @@ export const ObjectProfileDto = Type.Object(
     field: Type.Object({ fov_deg: Type.Number(), ra: Nullable(Type.Number()), dec: Nullable(Type.Number()) }),
     pack: Nullable(Type.String()),
     overlays: Type.Object({ gaia: Nullable(Type.String()), wise: Nullable(Type.String()) }),
+    finding: Nullable(Type.String()),
     stats: Type.Object({ posts: Type.Integer(), passes: Type.Integer(), followers: Type.Integer() }),
     following: Type.Boolean(),
   },
@@ -521,6 +522,10 @@ export const FindingSummary = Type.Object(
     credit_others: Type.Integer(),
     first_vote: Nullable(Type.Object({ nickname: Nullable(Type.String()), at: Type.Number(), note: Nullable(Type.String()) })),
     social: FindingSocial,
+    photo: Nullable(Type.String()),
+    photo_cols: Type.Integer(),
+    mark: Nullable(Type.Object({ x: Type.Number(), y: Type.Number() })),
+    object_id: Nullable(Type.String()),
   },
   { $id: 'FindingSummary' },
 )

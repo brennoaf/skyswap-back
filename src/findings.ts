@@ -29,7 +29,9 @@ const NOTE_HIDE_AT = 3
 export const DOUBT_REASONS = ['image_defect', 'known_asteroid', 'variable_star', 'other'] as const
 export type DoubtReason = (typeof DOUBT_REASONS)[number]
 export type ReactionKind = 'interesting' | 'doubt'
-export type FeedTab = 'new' | 'popular'
+export type FeedTab = 'new' | 'popular' | 'open' | 'solved'
+export const OPEN_STATES: FindingState[] = ['candidate', 'package_ready', 'in_review']
+export const SOLVED_STATES: FindingState[] = ['known', 'published', 'likely_artifact', 'discarded']
 
 export interface FindingCard {
   id: string
@@ -57,6 +59,8 @@ export interface FindingDeps {
   positions: (cardId: string) => { mjd: number; ra: number; dec: number }[]
   marks: (cardId: string) => CrowdMark[]
   spot: (cardId: string) => SkySpot | null
+  objectFor: (name: string) => string | null
+  hasThumb: (cardId: string) => boolean
   dataVersion: string
 }
 
@@ -448,7 +452,27 @@ export class Findings {
       credit_others: Math.max(0, credits.names.length - 2) + credits.anonymous,
       first_vote: this.firstVote(f),
       social: this.social(f.card_id, userId),
+      photo: card.sprite ?? (this.deps.hasThumb(card.id) ? `/api/community/findings/${encodeURIComponent(card.id)}/photo` : null),
+      photo_cols: card.sprite ? card.mjds.length : 1,
+      mark: this.firstMark(card.id),
+      object_id: f.state === 'known' && f.reason ? this.deps.objectFor(f.reason) : null,
     }
+  }
+
+  private firstMark(cardId: string): { x: number; y: number } | null {
+    const here = this.deps.marks(cardId).filter((m) => m.frame === 0)
+    if (!here.length) return null
+    const mid = (v: number[]) => {
+      const s = [...v].sort((a, b) => a - b)
+      const m = s.length >> 1
+      return s.length % 2 ? (s[m] as number) : ((s[m - 1] as number) + (s[m] as number)) / 2
+    }
+    return { x: mid(here.map((m) => m.x)), y: mid(here.map((m) => m.y)) }
+  }
+
+  forObject(objectId: string): string | null {
+    const rows = this.q("SELECT card_id, reason FROM findings WHERE state = 'known' AND example = 0 AND reason IS NOT NULL ORDER BY updated_at DESC, card_id").all() as { card_id: string; reason: string }[]
+    return rows.find((r) => this.deps.objectFor(r.reason) === objectId && this.deps.card(r.card_id))?.card_id ?? null
   }
 
   private popularRows(cursor: number): FindingRow[] {
@@ -461,7 +485,13 @@ export class Findings {
   }
 
   feed(cursor = 0, opts: { tab?: FeedTab; userId?: string | null } = {}) {
-    const rows = opts.tab === 'popular' ? this.popularRows(cursor) : (this.q('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[])
+    const states = opts.tab === 'open' ? OPEN_STATES : opts.tab === 'solved' ? SOLVED_STATES : null
+    const rows =
+      opts.tab === 'popular'
+        ? this.popularRows(cursor)
+        : states
+          ? (this.q(`SELECT * FROM findings WHERE state IN (${states.map(() => '?').join(', ')}) ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?`).all(...states, PAGE + 1, cursor) as FindingRow[])
+          : (this.q('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[])
     const items = rows.slice(0, PAGE).flatMap((f) => {
       const card = this.deps.card(f.card_id)
       return card ? [this.summary(f, card, opts.userId ?? null)] : []

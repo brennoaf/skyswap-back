@@ -262,7 +262,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       schema: {
         tags: ['sky'],
         summary: 'All 102 SPHEREx colours at one sky point, read from the IRSA DR1 all-sky cube (a quick look, not a measurement)',
-        querystring: Type.Object({ ra: Type.Number({ minimum: 0, maximum: 360 }), dec: Type.Number({ minimum: -90, maximum: 90 }), obj: Type.Optional(Type.String({ maxLength: 64 })) }),
+        querystring: Type.Object({ ra: Type.Number({ minimum: 0, maximum: 360 }), dec: Type.Number({ minimum: -90, maximum: 90 }), obj: Type.Optional(Type.String({ maxLength: 64 })), v: Type.Optional(Type.Integer({ minimum: 1, maximum: 99 })) }),
         response: { 200: S.PointSpectrum, 404: S.ErrorBody, 502: S.ErrorBody, 503: S.ErrorBody },
       },
       config: { rateLimit: { max: 30, timeWindow: '1 minute' } },

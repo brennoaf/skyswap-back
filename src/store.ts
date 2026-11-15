@@ -320,18 +320,24 @@ export class Store {
       .run(userId, cardId, this.now(), guided ? 1 : 0)
   }
 
-  guideCard(userId: string): DeckCard | null {
+  guideLessons(userId: string): { lesson: 'moves' | 'still' | 'glitch'; card: DeckCard }[] {
     const seen = new Set((this.db.prepare('SELECT card_id FROM votes WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id))
     const jump = (c: DeckCard) => {
       const [a, b] = c.marks ?? []
       return a && b ? Math.hypot(a.u - b.u, a.v - b.v) : 0
     }
-    const pool = this.kit.deck
-      .filter((c) => c.kind === 'mover' && c.gold === 'real' && (c.marks?.length ?? 0) >= 2 && !seen.has(c.id))
-      .sort((a, b) => a.n_frames - b.n_frames || jump(b) - jump(a))
-    const card = pool[0] ?? null
-    if (card) this.issueCard(userId, card.id, true)
-    return card
+    const snr = (c: DeckCard) => c.pipeline.snr ?? 0
+    const pick = (test: (c: DeckCard) => boolean, order: (a: DeckCard, b: DeckCard) => number) => this.kit.deck.filter((c) => test(c) && !seen.has(c.id)).sort(order)[0]
+    const plan = [
+      { lesson: 'moves' as const, card: pick((c) => c.kind === 'mover' && c.gold === 'real' && (c.marks?.length ?? 0) >= 2, (a, b) => a.n_frames - b.n_frames || jump(b) - jump(a)) },
+      { lesson: 'still' as const, card: pick((c) => c.kind === 'stationary' && c.gold === 'artifact', (a, b) => snr(b) - snr(a)) },
+      { lesson: 'glitch' as const, card: pick((c) => c.kind === 'single' && c.gold === 'artifact', (a, b) => a.n_frames - b.n_frames || snr(b) - snr(a)) },
+    ]
+    return plan.flatMap((p) => {
+      if (!p.card) return []
+      this.issueCard(userId, p.card.id, true)
+      return [{ lesson: p.lesson, card: p.card }]
+    })
   }
 
   private isGuided(userId: string, cardId: string): boolean {

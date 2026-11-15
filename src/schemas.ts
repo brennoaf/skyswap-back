@@ -223,7 +223,7 @@ export const VoteBody = Type.Object({
 
 export const GlitchBody = Type.Object({ glitch: Nullable(Type.Boolean()) })
 
-export const GuideResponse = Type.Object({ card: Nullable(DeckCardPublic), marks: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })) }, { $id: 'GuideResponse' })
+export const GuideResponse = Type.Object({ lessons: Type.Array(Type.Object({ lesson: Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('glitch')]), card: DeckCardPublic, marks: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })) })) }, { $id: 'GuideResponse' })
 
 export const Reveal = Type.Object(
   {

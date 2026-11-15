@@ -111,6 +111,49 @@ export const MIGRATIONS: string[] = [
    ALTER TABLE votes ADD COLUMN cell INTEGER;
    CREATE INDEX votes_cell ON votes(cell);`,
   `ALTER TABLE votes ADD COLUMN position TEXT;`,
+  `CREATE TABLE findings (
+     card_id TEXT PRIMARY KEY,
+     state TEXT NOT NULL,
+     reason TEXT,
+     example INTEGER NOT NULL DEFAULT 0,
+     credits TEXT,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE INDEX findings_updated ON findings(updated_at DESC);
+   CREATE TABLE finding_events (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     card_id TEXT NOT NULL,
+     state TEXT NOT NULL,
+     reason TEXT,
+     source TEXT NOT NULL,
+     url TEXT,
+     data_version TEXT NOT NULL,
+     example INTEGER NOT NULL DEFAULT 0,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX finding_events_card ON finding_events(card_id, id);
+   CREATE TRIGGER finding_events_keep_update BEFORE UPDATE ON finding_events BEGIN SELECT RAISE(ABORT, 'finding_events is append-only'); END;
+   CREATE TRIGGER finding_events_keep_delete BEFORE DELETE ON finding_events WHEN OLD.example = 0 BEGIN SELECT RAISE(ABORT, 'finding_events is append-only'); END;
+   CREATE TABLE finding_checks (
+     card_id TEXT NOT NULL,
+     service TEXT NOT NULL,
+     result TEXT NOT NULL CHECK (result IN ('found', 'nothing', 'unavailable')),
+     names TEXT NOT NULL,
+     note TEXT,
+     checked_at INTEGER NOT NULL,
+     attempts INTEGER NOT NULL,
+     PRIMARY KEY (card_id, service)
+   );
+   CREATE TABLE card_exposures (
+     user_id TEXT NOT NULL,
+     card_id TEXT NOT NULL,
+     source TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, card_id)
+   );
+   ALTER TABLE users ADD COLUMN credit_visible INTEGER NOT NULL DEFAULT 1;`,
+  `ALTER TABLE finding_checks ADD COLUMN points TEXT;`,
 ]
 
 export function openDb(path: string): DB {

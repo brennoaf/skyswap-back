@@ -18,8 +18,11 @@ import * as S from './schemas.js'
 import { contentRoutes } from './routes/content.js'
 import { socialRoutes } from './routes/social.js'
 import { classifyRoutes } from './routes/classify.js'
+import { communityRoutes } from './routes/community.js'
+import { makeChecker } from './checks.js'
 
 export const SESSION_COOKIE = 'ss_session'
+const CHECK_RETRY_MS = 10 * 60_000
 export const TRUSTED_PROXY = '127.0.0.1'
 
 declare module 'fastify' {
@@ -58,7 +61,7 @@ export async function buildApp(deps: AppDeps) {
   })
   await app.register(swaggerUi, { routePrefix: '/docs' })
 
-  for (const schema of [S.ErrorBody, S.ObjectCard, S.FrameDto, S.TagSummary, S.PostDto, S.FeedItem, S.XpDto, S.UserDto, S.Reveal, S.DeckCardPublic, S.SpotDto]) app.addSchema(schema)
+  for (const schema of [S.FindingSummary, S.CommunityFeed, S.FindingDetail, S.MyCards, S.CreditResponse, S.ErrorBody, S.ObjectCard, S.FrameDto, S.TagSummary, S.PostDto, S.FeedItem, S.XpDto, S.UserDto, S.Reveal, S.DeckCardPublic, S.SpotDto]) app.addSchema(schema)
 
   app.decorateRequest('user', null)
   app.addHook('onRequest', async (req) => {
@@ -89,9 +92,18 @@ export async function buildApp(deps: AppDeps) {
 
   const cache = deps.cache ?? new DiskCache(config.cacheDir, config.cacheBytes)
   const ctx = { store, kit, config, fetchImpl: deps.fetchImpl ?? fetch, cache }
+  store.findings.attachChecker(makeChecker(ctx.fetchImpl, config.online))
+  store.findings.retryDue()
+  const retry = setInterval(() => store.findings.retryDue(), CHECK_RETRY_MS)
+  retry.unref()
+  app.addHook('onClose', async () => {
+    clearInterval(retry)
+    await store.findings.drain()
+  })
   await app.register(contentRoutes, ctx)
   await app.register(socialRoutes, ctx)
   await app.register(classifyRoutes, ctx)
+  await app.register(communityRoutes, ctx)
 
   await app.ready()
   return { app, store, kit, db, cache }

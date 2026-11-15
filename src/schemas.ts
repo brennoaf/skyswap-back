@@ -397,3 +397,53 @@ export const HealthResponse = Type.Object(
 )
 
 export const ObjectsResponse = Type.Object({ objects: Type.Array(ObjectCard) }, { $id: 'ObjectsResponse' })
+
+export const FindingSummary = Type.Object(
+  {
+    id: Type.String(),
+    kind: Type.Union([Type.Literal('sky'), Type.Literal('deck')]),
+    state: Type.String(),
+    reason: Nullable(Type.String()),
+    example: Type.Boolean(),
+    ra: Type.Number(),
+    dec: Type.Number(),
+    band: Type.String(),
+    sprite: Nullable(Type.String()),
+    passes: Type.Integer(),
+    first_t: Nullable(Type.String()),
+    last_t: Nullable(Type.String()),
+    updated_at: Type.Number(),
+    checks_done: Type.Integer(),
+    checks_total: Type.Integer(),
+    credit_names: Type.Array(Type.String()),
+    credit_others: Type.Integer(),
+  },
+  { $id: 'FindingSummary' },
+)
+
+export const CommunityFeed = Type.Object({ items: Type.Array(FindingSummary), next_cursor: Nullable(Type.Integer()) }, { $id: 'CommunityFeed' })
+
+export const FindingDetail = Type.Object(
+  {
+    ...FindingSummary.properties,
+      fov_deg: Type.Number(),
+      offsets_s: Type.Array(Type.Number()),
+      checks: Type.Array(Type.Object({ service: Type.String(), result: Nullable(Type.String()), names: Type.Array(Type.String()), note: Nullable(Type.String()), checked_at: Nullable(Type.Number()) })),
+      events: Type.Array(Type.Object({ state: Type.String(), reason: Nullable(Type.String()), source: Type.String(), url: Nullable(Type.String()), data_version: Type.String(), created_at: Type.Number() })),
+      credits: Type.Array(Type.String()),
+      credits_anonymous: Type.Integer(),
+      first_vote: Nullable(Type.Object({ nickname: Nullable(Type.String()), at: Type.Number() })),
+      data_version: Type.String(),
+  },
+  { $id: 'FindingDetail' },
+)
+
+export const MyCards = Type.Object(
+  {
+    items: Type.Array(Type.Object({ card_id: Type.String(), label: Type.String(), created_at: Type.Number(), practice: Type.Boolean(), finding: Nullable(Type.String()), status: Type.String() })),
+    next_cursor: Nullable(Type.Integer()),
+  },
+  { $id: 'MyCards' },
+)
+
+export const CreditResponse = Type.Object({ visible: Type.Boolean() }, { $id: 'CreditResponse' })

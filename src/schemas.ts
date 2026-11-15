@@ -163,6 +163,7 @@ const deckCardFields = {
   sprite: Type.String(),
   n_frames: Type.Integer(),
   offsets_s: Type.Array(Type.Number()),
+  t0: Type.String(),
 }
 
 export const DeckCardPublic = Type.Object(deckCardFields, { $id: 'DeckCard' })

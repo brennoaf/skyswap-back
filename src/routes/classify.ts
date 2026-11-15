@@ -1,6 +1,6 @@
 import { Type, type FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { requireUser, writeLimit } from '../app.js'
-import { EXPLORE_ORDER, skyVisits } from '../explore.js'
+import { EXPLORE_ORDER, mjdIso, skyVisits } from '../explore.js'
 import type { DeckCard } from '../kit.js'
 import * as S from '../schemas.js'
 import { isSafeCutoutKey, type RouteCtx } from './content.js'
@@ -11,6 +11,7 @@ export function publicCard(c: DeckCard) {
     sprite: `/kit/deck/${c.sprite.split('/').pop() ?? ''}`,
     n_frames: c.n_frames,
     offsets_s: c.frames.map((f) => Math.round(((f.mjd - (c.frames[0]?.mjd ?? f.mjd)) * 86400))),
+    t0: mjdIso(c.frames[0]?.mjd ?? 0),
   }
 }
 

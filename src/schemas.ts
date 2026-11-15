@@ -95,6 +95,7 @@ export const StoryScreen = Type.Union(
     Type.Object({ kind: Type.Literal('curve'), band: Type.String(), saturated: Type.Boolean(), points: Type.Array(Type.Object({ t: Type.String(), mag: Type.Number(), err: Type.Number() })) }),
     Type.Object({
       kind: Type.Literal('colours'),
+      reading: Type.Union([Type.Literal('measured'), Type.Literal('saturated'), Type.Literal('none')]),
       frames: Type.Array(Type.Object({ band: Type.String(), src: Type.String(), um: Nullable(Type.Array(Type.Number())), mark: StoryMark })),
       signal: Type.Array(Nullable(Type.Number())),
       features: Type.Array(Type.Object({ name_pt: Type.String(), name_en: Type.String() })),

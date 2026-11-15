@@ -12,6 +12,7 @@ const WISE_W2_UM = 4.6
 
 type Mark = { x: number; y: number }
 export type StoryFeature = { name_pt: string; name_en: string }
+export type SpectrumReading = 'measured' | 'saturated' | 'none'
 export const STORY_FEATURES = 3
 
 export type StoryFrame = { src: string; t: string; telescope: string | null; mark: Mark | null }
@@ -20,7 +21,7 @@ export type StoryScreen =
   | { kind: 'blink'; topic: 'years' | 'passes' | 'night' | 'brightness'; band: string | null; wavelength_um: number | null; fixed: boolean; frames: StoryFrame[] }
   | { kind: 'still'; topic: 'difference'; band: string | null; src: string; hours: number | null }
   | { kind: 'curve'; band: string; saturated: boolean; points: { t: string; mag: number; err: number }[] }
-  | { kind: 'colours'; frames: { band: string; src: string; um: [number, number] | null; mark: Mark | null }[]; signal: (number | null)[]; features: StoryFeature[] }
+  | { kind: 'colours'; reading: SpectrumReading; frames: { band: string; src: string; um: [number, number] | null; mark: Mark | null }[]; signal: (number | null)[]; features: StoryFeature[] }
   | { kind: 'end'; motion: { measured_arcsec: number; err_arcsec: number; predicted_arcsec: number; days: number } | null; images: number; passes: number }
 
 export function spread<T>(items: T[], max = STORY_MAX_FRAMES): T[] {
@@ -95,7 +96,13 @@ function brightnessScreens(kit: Kit, profile: ObjectProfile, posts: Post[]): Sto
   return out
 }
 
-type FeaturesFile = { judged?: boolean; features?: { name_pt: string; name_en: string; sigma?: number }[] }
+type FeaturesFile = { judged?: boolean; reason?: string | null; features?: { name_pt: string; name_en: string; sigma?: number }[] }
+
+export function spectrumReading(saturation: string | undefined, file: FeaturesFile | null): SpectrumReading {
+  if (saturation === 'heavy' || (file?.judged === false && file.reason === 'too_bright')) return 'saturated'
+  if (file?.judged === false && file.reason === 'no_spectrum') return 'none'
+  return 'measured'
+}
 
 export function featureNames(file: FeaturesFile | null): StoryFeature[] {
   if (!file?.judged) return []
@@ -109,14 +116,17 @@ function coloursScreen(kit: Kit, profile: ObjectProfile, posts: Post[]): StorySc
   if (!post) return null
   const byBand = BANDS.map((band) => post.frames.find((f) => f.band === band)).filter((f): f is Frame => !!f)
   if (byBand.length < BANDS.length) return null
+  const file = readScience<FeaturesFile>(kit, profile.id, profile.measurements?.features)
+  const reading = spectrumReading(profile.saturation, file)
   return {
     kind: 'colours',
+    reading,
     frames: byBand.map((f) => ({ band: f.band, src: mediaUrl(post.object_id, f.src), um: f.wavelength_um, mark: markOf(post, post.frames.indexOf(f)) })),
     signal: BANDS.map((b) => {
       const v = profile.band_stats?.[b]?.snr_pass
-      return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : null
+      return reading === 'measured' && typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : null
     }),
-    features: featureNames(readScience<FeaturesFile>(kit, profile.id, profile.measurements?.features)),
+    features: reading === 'measured' ? featureNames(file) : [],
   }
 }
 

@@ -218,6 +218,7 @@ export const VoteBody = Type.Object({
   choice: Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('unsure')]),
   glitch: Type.Optional(Nullable(Type.Boolean())),
   position: Type.Optional(Type.Object({ frame: Type.Integer({ minimum: 0, maximum: 64 }), x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }) }, { additionalProperties: false })),
+  held_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000 })),
 })
 
 export const GlitchBody = Type.Object({ glitch: Nullable(Type.Boolean()) })

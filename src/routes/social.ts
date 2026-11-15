@@ -12,10 +12,10 @@ const COOKIE_OPTS = { path: '/', httpOnly: true, sameSite: 'lax' as const, maxAg
 const OFFER_SIZE = 3
 const MAX_NOT = 30
 
-export const socialRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store }) => {
+export const socialRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store, config }) => {
   app.get('/api/session', { schema: { tags: ['session'], response: { 200: S.SessionResponse } } }, async (req) => ({ user: req.user }))
 
-  app.post('/api/session', { schema: { tags: ['session'], body: S.SessionBody, response: { 200: S.SessionResponse, 409: S.ErrorBody } }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/session', { schema: { tags: ['session'], body: S.SessionBody, response: { 200: S.SessionResponse, 409: S.ErrorBody } }, config: { rateLimit: { max: config.testRun ? 1000 : 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const { user, token } = store.createUser(req.body.nickname, req.body.avatar_id, deviceOf(req.headers['user-agent']))
     reply.setCookie(SESSION_COOKIE, token, COOKIE_OPTS)
     return { user }

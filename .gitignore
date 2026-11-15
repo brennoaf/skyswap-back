@@ -3,3 +3,10 @@ var
 *.sqlite
 *.sqlite-*
 .env
+
+# tests and docs stay local
+tests/
+docs/
+*.md
+*.test.*
+*.spec.*

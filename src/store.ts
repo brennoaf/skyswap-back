@@ -367,6 +367,10 @@ export class Store {
     if (r.changes === 0) throw new HttpError(404, 'no_vote')
   }
 
+  private knownName(name: string): string {
+    return this.kit.objects.find((o) => o.name === name || o.name.startsWith(`${name} `) || o.aliases.includes(name))?.name ?? name
+  }
+
   reveal(card: DeckCard, correct: boolean | null, choice: Choice) {
     const s = this.swapCards.get(card.id) ?? new SwapCard(card.gold ?? null)
     const looked = (this.db.prepare('SELECT COUNT(DISTINCT user_id) AS n FROM votes WHERE card_id = ?').get(card.id) as { n: number }).n
@@ -380,7 +384,7 @@ export class Store {
       tile: card.tile,
       size_px: card.size_px,
       frames: card.frames.map((f) => ({ t: f.t, mjd: f.mjd, n_exp: f.n_exp, wl_min: f.wl_min, wl_max: f.wl_max })),
-      known: card.known ? { name: card.known.name, V: card.known.V ?? null, rate_arcsec_h: card.known.rate_arcsec_h ?? null } : null,
+      known: card.known ? { name: this.knownName(card.known.name), V: card.known.V ?? null, rate_arcsec_h: card.known.rate_arcsec_h ?? null } : null,
       rate_arcsec_h: card.rate_arcsec_h ?? null,
       ra: card.ra,
       dec: card.dec,

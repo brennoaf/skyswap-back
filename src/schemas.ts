@@ -170,7 +170,7 @@ export const DeckCardPublic = Type.Object(
 
 export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic), sky: Type.Boolean(), interesting: Type.Boolean() }, { $id: 'NextCardResponse' })
 
-export const NextCardQuery = Type.Object({ explore: Type.Optional(Type.Boolean()), known: Type.Optional(Type.Boolean()), open: Type.Optional(Type.Boolean()) })
+export const NextCardQuery = Type.Object({ explore: Type.Optional(Type.Boolean()), known: Type.Optional(Type.Boolean()), open: Type.Optional(Type.Boolean()), not: Type.Optional(Type.String({ maxLength: 200 })) })
 
 export const SkyCardBody = Type.Object({
   ra: Type.Number({ minimum: 0, maximum: 360 }),
@@ -500,5 +500,7 @@ export const MyCards = Type.Object(
   },
   { $id: 'MyCards' },
 )
+
+export const MyCardDetail = Type.Object({ label: Type.String(), reveal: Reveal })
 
 export const CreditResponse = Type.Object({ visible: Type.Boolean() }, { $id: 'CreditResponse' })

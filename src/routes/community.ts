@@ -93,6 +93,16 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
     },
   )
 
+  app.get(
+    '/api/me/cards/:id',
+    { schema: { tags: ['me'], params: Type.Object({ id: Type.String({ maxLength: 120 }) }), response: { 200: S.MyCardDetail, 401: S.ErrorBody, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      return store.myCard(user.id, req.params.id)
+    },
+  )
+
   app.get('/api/me/credit', { schema: { tags: ['me'], response: { 200: S.CreditResponse, 401: S.ErrorBody } } }, async (req, reply) => {
     const user = requireUser(req, reply)
     if (!user) return reply

@@ -128,11 +128,23 @@ export class Store {
     const rows = this.db.prepare('SELECT card_id, label, counted, created_at FROM votes WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?').all(userId, MY_CARDS_PAGE + 1, cursor) as { card_id: string; label: string; counted: number; created_at: number }[]
     const items = rows.slice(0, MY_CARDS_PAGE).map((v) => {
       const s = this.swapCards.get(v.card_id)
-      const practice = !v.counted || !!s?.gold
-      const finding = practice ? null : this.findings.stateOf(v.card_id)
-      return { card_id: v.card_id, label: v.label, created_at: v.created_at, practice, finding, status: practice ? 'practice' : (s?.status ?? 'open') }
+      const practice = this.isGuided(userId, v.card_id)
+      const quiet = !v.counted || !!s?.gold
+      const finding = practice || quiet ? null : this.findings.stateOf(v.card_id)
+      return { card_id: v.card_id, label: v.label, created_at: v.created_at, practice, finding, status: practice ? 'practice' : quiet ? 'answered' : (s?.status ?? 'open') }
     })
     return { items, next_cursor: rows.length > MY_CARDS_PAGE ? cursor + MY_CARDS_PAGE : null }
+  }
+
+  myCard(userId: string, cardId: string) {
+    const vote = this.db.prepare('SELECT label FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { label: string } | undefined
+    if (!vote) throw new HttpError(404, 'not_answered')
+    const choice: Choice = vote.label === 'real' ? 'moves' : vote.label === 'artifact' ? 'still' : 'unsure'
+    const card = this.kit.deckById.get(cardId)
+    const sky = this.skyCards.get(cardId)
+    if (!card && !sky) throw new HttpError(404, 'unknown_card')
+    const reveal = card ? this.reveal(card, null, choice) : this.skyReveal(sky as SkyCard, choice)
+    return { label: vote.label, reveal: { ...reveal, control: null, marks: [] } }
   }
 
   private loadSkyCards(): void {
@@ -282,8 +294,8 @@ export class Store {
     return n
   }
 
-  next(userId: string, opts: { explore?: boolean; known?: boolean; open?: boolean } = {}): { card: DeckCard | null; sky: boolean; interesting: boolean } {
-    const seen = this.seenCards(userId)
+  next(userId: string, opts: { explore?: boolean; known?: boolean; open?: boolean; not?: string[] } = {}): { card: DeckCard | null; sky: boolean; interesting: boolean } {
+    const seen = new Set([...this.seenCards(userId), ...(opts.not ?? [])])
     if (opts.open && this.openCards(userId) > 0) return { card: this.nextCard(userId, { seen }), sky: false, interesting: false }
     if (opts.explore && this.quietStreak(userId)) {
       const mover = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id))

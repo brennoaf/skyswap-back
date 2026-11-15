@@ -18,7 +18,7 @@ export const classifyRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, {
   app.get('/api/classify/next', { schema: { tags: ['classify'], querystring: S.NextCardQuery, response: { 200: S.NextCardResponse, 401: S.ErrorBody } } }, async (req, reply) => {
     const user = requireUser(req, reply)
     if (!user) return reply
-    const r = store.next(user.id, { explore: req.query.explore, known: req.query.known, open: req.query.open })
+    const r = store.next(user.id, { explore: req.query.explore, known: req.query.known, open: req.query.open, not: (req.query.not ?? '').split(',').filter(Boolean) })
     return { done: !r.card && !r.sky, card: r.card ? publicCard(r.card) : null, sky: r.sky, interesting: r.interesting }
   })
 

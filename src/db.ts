@@ -154,6 +154,30 @@ export const MIGRATIONS: string[] = [
    );
    ALTER TABLE users ADD COLUMN credit_visible INTEGER NOT NULL DEFAULT 1;`,
   `ALTER TABLE finding_checks ADD COLUMN points TEXT;`,
+  `CREATE TABLE reactions (
+     user_id TEXT NOT NULL,
+     card_id TEXT NOT NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('interesting', 'doubt')),
+     reason TEXT,
+     position TEXT,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, card_id, kind)
+   );
+   CREATE INDEX reactions_card ON reactions (card_id);
+   CREATE TABLE second_looks (
+     user_id TEXT NOT NULL,
+     card_id TEXT NOT NULL,
+     label TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, card_id)
+   );
+   CREATE INDEX second_looks_card ON second_looks (card_id);
+   CREATE TABLE finding_follows (
+     user_id TEXT NOT NULL,
+     card_id TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, card_id)
+   );`,
 ]
 
 export function openDb(path: string): DB {

@@ -12,7 +12,17 @@ const RETRY_BASE_MS = 30 * 60_000
 const MAX_ATTEMPTS = 8
 const PAGE = 12
 
+const DAY_MS = 86_400_000
+const POPULAR_WINDOW_MS = 14 * DAY_MS
+const POPULAR_HALF_LIFE_MS = 7 * DAY_MS
+const POPULAR_DISCOUNT = 0.3
+const POPULAR_DISCOUNTED: FindingState[] = ['likely_artifact', 'known']
+
 export const EXAMPLE_PREFIX = 'example:'
+export const DOUBT_REASONS = ['image_defect', 'known_asteroid', 'variable_star', 'other'] as const
+export type DoubtReason = (typeof DOUBT_REASONS)[number]
+export type ReactionKind = 'interesting' | 'doubt'
+export type FeedTab = 'new' | 'popular'
 
 export interface FindingCard {
   id: string
@@ -217,7 +227,116 @@ export class Findings {
     return this.db.prepare('SELECT service, result, names, note, checked_at, attempts FROM finding_checks WHERE card_id = ?').all(cardId) as CheckRow[]
   }
 
-  private summary(f: FindingRow, card: FindingCard) {
+  setReaction(userId: string, cardId: string, kind: ReactionKind, on: boolean, reason: DoubtReason | null = null, position: { frame: number; x: number; y: number } | null = null): void {
+    if (!on) {
+      this.db.prepare('DELETE FROM reactions WHERE user_id = ? AND card_id = ? AND kind = ?').run(userId, cardId, kind)
+      return
+    }
+    this.db
+      .prepare(
+        `INSERT INTO reactions (user_id, card_id, kind, reason, position, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, card_id, kind) DO UPDATE SET reason = excluded.reason, position = COALESCE(excluded.position, position)`,
+      )
+      .run(userId, cardId, kind, kind === 'doubt' ? reason : null, kind === 'doubt' && position ? JSON.stringify(position) : null, this.now())
+  }
+
+  secondLook(userId: string, cardId: string, label: string): boolean {
+    if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) return false
+    this.db.prepare('INSERT INTO second_looks (user_id, card_id, label, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET label = excluded.label').run(userId, cardId, label, this.now())
+    return true
+  }
+
+  setFollow(userId: string, cardId: string, on: boolean): void {
+    if (on) this.db.prepare('INSERT OR IGNORE INTO finding_follows (user_id, card_id, created_at) VALUES (?, ?, ?)').run(userId, cardId, this.now())
+    else this.db.prepare('DELETE FROM finding_follows WHERE user_id = ? AND card_id = ?').run(userId, cardId)
+  }
+
+  private count(sql: string, ...args: unknown[]): number {
+    return (this.db.prepare(sql).get(...args) as { n: number }).n
+  }
+
+  social(cardId: string, userId: string | null) {
+    const reasons = this.db.prepare("SELECT reason, COUNT(*) AS n FROM reactions WHERE card_id = ? AND kind = 'doubt' GROUP BY reason").all(cardId) as { reason: DoubtReason; n: number }[]
+    const byReason = Object.fromEntries(DOUBT_REASONS.map((r) => [r, reasons.find((x) => x.reason === r)?.n ?? 0])) as Record<DoubtReason, number>
+    return {
+      interesting: this.count("SELECT COUNT(*) AS n FROM reactions WHERE card_id = ? AND kind = 'interesting'", cardId),
+      doubts: reasons.reduce((sum, r) => sum + r.n, 0),
+      doubt_reasons: byReason,
+      also_seen: this.count('SELECT COUNT(*) AS n FROM second_looks WHERE card_id = ?', cardId),
+      blind_answers: this.count('SELECT COUNT(DISTINCT user_id) AS n FROM votes WHERE card_id = ? AND counted = 1', cardId),
+      mine: userId ? this.mine(cardId, userId) : null,
+    }
+  }
+
+  private mine(cardId: string, userId: string) {
+    const rows = this.db.prepare('SELECT kind, reason FROM reactions WHERE card_id = ? AND user_id = ?').all(cardId, userId) as { kind: ReactionKind; reason: DoubtReason | null }[]
+    const look = this.db.prepare('SELECT label FROM second_looks WHERE card_id = ? AND user_id = ?').get(cardId, userId) as { label: string } | undefined
+    const vote = this.db.prepare('SELECT label FROM votes WHERE card_id = ? AND user_id = ?').get(cardId, userId) as { label: string } | undefined
+    return {
+      interesting: rows.some((r) => r.kind === 'interesting'),
+      doubt: rows.find((r) => r.kind === 'doubt')?.reason ?? null,
+      second_look: look?.label ?? null,
+      vote: vote?.label ?? null,
+      following: !!this.db.prepare('SELECT 1 FROM finding_follows WHERE card_id = ? AND user_id = ?').get(cardId, userId),
+    }
+  }
+
+  people(cardId: string) {
+    const compare = (a: string, b: string) => a.localeCompare(b, 'en', { sensitivity: 'base' })
+    const split = (rows: { nickname: string; credit_visible: number }[]) => rows.filter((r) => r.credit_visible)
+    const interesting = this.db.prepare("SELECT u.nickname, u.credit_visible FROM reactions r JOIN users u ON u.id = r.user_id WHERE r.card_id = ? AND r.kind = 'interesting'").all(cardId) as { nickname: string; credit_visible: number }[]
+    const doubts = this.db.prepare("SELECT u.nickname, u.credit_visible, r.reason FROM reactions r JOIN users u ON u.id = r.user_id WHERE r.card_id = ? AND r.kind = 'doubt'").all(cardId) as { nickname: string; credit_visible: number; reason: string }[]
+    const looks = this.db.prepare('SELECT u.nickname, u.credit_visible FROM second_looks s JOIN users u ON u.id = s.user_id WHERE s.card_id = ?').all(cardId) as { nickname: string; credit_visible: number }[]
+    const shownInteresting = split(interesting)
+    const shownDoubts = doubts.filter((d) => d.credit_visible)
+    const shownLooks = split(looks)
+    return {
+      interesting: shownInteresting.map((r) => r.nickname).sort(compare),
+      interesting_anonymous: interesting.length - shownInteresting.length,
+      doubts: shownDoubts.map((d) => ({ name: d.nickname, reason: d.reason })).sort((a, b) => compare(a.name, b.name)),
+      doubts_anonymous: doubts.length - shownDoubts.length,
+      also_seen: shownLooks.map((r) => r.nickname).sort(compare),
+      also_seen_anonymous: looks.length - shownLooks.length,
+    }
+  }
+
+  private popularity(): Map<string, number> {
+    const now = this.now()
+    const since = now - POPULAR_WINDOW_MS
+    const rows = this.db
+      .prepare(
+        `SELECT card_id, user_id, created_at, 3 AS weight FROM second_looks WHERE created_at >= @since
+         UNION ALL SELECT card_id, user_id, created_at, CASE kind WHEN 'doubt' THEN 2 ELSE 1 END AS weight FROM reactions WHERE created_at >= @since`,
+      )
+      .all({ since }) as { card_id: string; user_id: string; created_at: number; weight: number }[]
+    const best = new Map<string, Map<string, number>>()
+    for (const r of rows) {
+      const value = r.weight * 0.5 ** ((now - r.created_at) / POPULAR_HALF_LIFE_MS)
+      const people = best.get(r.card_id) ?? new Map<string, number>()
+      people.set(r.user_id, Math.max(people.get(r.user_id) ?? 0, value))
+      best.set(r.card_id, people)
+    }
+    const scores = new Map<string, number>()
+    for (const [cardId, people] of best) {
+      const state = this.row(cardId)?.state
+      if (!state) continue
+      const sum = [...people.values()].reduce((a, b) => a + b, 0)
+      scores.set(cardId, POPULAR_DISCOUNTED.includes(state) ? sum * POPULAR_DISCOUNT : sum)
+    }
+    return scores
+  }
+
+  hasPopular(): boolean {
+    return this.popularity().size > 0
+  }
+
+  highlight(userId: string | null) {
+    const f = this.db.prepare("SELECT * FROM findings WHERE state = 'published' ORDER BY updated_at DESC, card_id LIMIT 1").get() as FindingRow | undefined
+    const card = f ? this.deps.card(f.card_id) : null
+    return f && card ? this.summary(f, card, userId) : null
+  }
+
+  private summary(f: FindingRow, card: FindingCard, userId: string | null) {
     const checks = this.checkRows(f.card_id)
     const credits = this.credits(f)
     const times = card.mjds.map((m) => new Date((m - 40587) * 86_400_000).toISOString())
@@ -239,26 +358,36 @@ export class Findings {
       checks_total: CHECK_SERVICES.length,
       credit_names: credits.names.slice(0, 2),
       credit_others: Math.max(0, credits.names.length - 2) + credits.anonymous,
+      social: this.social(f.card_id, userId),
     }
   }
 
-  feed(cursor = 0) {
-    const rows = this.db.prepare('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[]
+  private popularRows(cursor: number): FindingRow[] {
+    const scores = this.popularity()
+    const ids = [...scores.keys()].sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0) || a.localeCompare(b))
+    return ids.slice(cursor, cursor + PAGE + 1).flatMap((id) => {
+      const f = this.row(id)
+      return f ? [f] : []
+    })
+  }
+
+  feed(cursor = 0, opts: { tab?: FeedTab; userId?: string | null } = {}) {
+    const rows = opts.tab === 'popular' ? this.popularRows(cursor) : (this.db.prepare('SELECT * FROM findings ORDER BY updated_at DESC, card_id LIMIT ? OFFSET ?').all(PAGE + 1, cursor) as FindingRow[])
     const items = rows.slice(0, PAGE).flatMap((f) => {
       const card = this.deps.card(f.card_id)
-      return card ? [this.summary(f, card)] : []
+      return card ? [this.summary(f, card, opts.userId ?? null)] : []
     })
     return { items, next_cursor: rows.length > PAGE ? cursor + PAGE : null }
   }
 
-  detail(cardId: string) {
+  detail(cardId: string, userId: string | null = null) {
     const f = this.row(cardId)
     const card = f ? this.deps.card(cardId) : null
     if (!f || !card) return null
     const events = this.db.prepare('SELECT state, reason, source, url, data_version, created_at FROM finding_events WHERE card_id = ? ORDER BY id').all(cardId) as { state: string; reason: string | null; source: string; url: string | null; data_version: string; created_at: number }[]
     const credits = this.credits(f)
     return {
-      ...this.summary(f, card),
+      ...this.summary(f, card, userId),
       fov_deg: card.fov_deg,
       offsets_s: card.offsets_s,
       checks: CHECK_SERVICES.map((service) => {
@@ -277,13 +406,17 @@ export class Findings {
     return this.row(cardId)?.state ?? null
   }
 
-  eventsForAlerts(userId: string): { id: string; card_id: string; state: string; reason: string | null; created_at: number }[] {
+  eventsForAlerts(userId: string): { id: string; card_id: string; state: string; reason: string | null; created_at: number; followed: number }[] {
     return this.db
       .prepare(
-        `SELECT 'finding:' || e.id AS id, e.card_id, e.state, e.reason, e.created_at FROM finding_events e
-         WHERE e.example = 0 AND e.card_id IN (SELECT card_id FROM votes WHERE user_id = ? AND counted = 1)`,
+        `SELECT 'finding:' || e.id AS id, e.card_id, e.state, e.reason, e.created_at, 0 AS followed FROM finding_events e
+         WHERE e.example = 0 AND e.card_id IN (SELECT card_id FROM votes WHERE user_id = @user AND counted = 1)
+         UNION ALL
+         SELECT 'finding:' || e.id AS id, e.card_id, e.state, e.reason, e.created_at, 1 AS followed FROM finding_events e
+         JOIN finding_follows ff ON ff.card_id = e.card_id AND ff.user_id = @user
+         WHERE e.example = 0 AND e.created_at > ff.created_at AND e.card_id NOT IN (SELECT card_id FROM votes WHERE user_id = @user AND counted = 1)`,
       )
-      .all(userId) as { id: string; card_id: string; state: string; reason: string | null; created_at: number }[]
+      .all({ user: userId }) as { id: string; card_id: string; state: string; reason: string | null; created_at: number; followed: number }[]
   }
 
   seedExamples(cards: FindingCard[]): number {
@@ -313,6 +446,9 @@ export class Findings {
       for (const id of ids) {
         this.db.prepare('DELETE FROM finding_events WHERE card_id = ?').run(id)
         this.db.prepare('DELETE FROM finding_checks WHERE card_id = ?').run(id)
+        this.db.prepare('DELETE FROM reactions WHERE card_id = ?').run(id)
+        this.db.prepare('DELETE FROM second_looks WHERE card_id = ?').run(id)
+        this.db.prepare('DELETE FROM finding_follows WHERE card_id = ?').run(id)
         this.db.prepare('DELETE FROM findings WHERE card_id = ?').run(id)
       }
     })()

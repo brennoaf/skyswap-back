@@ -257,8 +257,20 @@ export class Store {
     return last.length === QUIET_STREAK && last.every((v) => this.skyCards.has(v.card_id) && v.label === 'artifact')
   }
 
-  next(userId: string, opts: { explore?: boolean; known?: boolean } = {}): { card: DeckCard | null; sky: boolean; interesting: boolean } {
-    const seen = new Set([...(this.db.prepare('SELECT card_id FROM votes WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id), ...this.findings.exposedCards(userId)])
+  private seenCards(userId: string): Set<string> {
+    return new Set([...(this.db.prepare('SELECT card_id FROM votes WHERE user_id = ?').all(userId) as { card_id: string }[]).map((r) => r.card_id), ...this.findings.exposedCards(userId)])
+  }
+
+  openCards(userId: string | null): number {
+    const seen = userId ? this.seenCards(userId) : new Set<string>()
+    let n = 0
+    for (const [id, c] of this.swapCards) if (!c.gold && c.status === 'open' && this.kit.deckById.has(id) && !seen.has(id)) n += 1
+    return n
+  }
+
+  next(userId: string, opts: { explore?: boolean; known?: boolean; open?: boolean } = {}): { card: DeckCard | null; sky: boolean; interesting: boolean } {
+    const seen = this.seenCards(userId)
+    if (opts.open && this.openCards(userId) > 0) return { card: this.nextCard(userId, { seen }), sky: false, interesting: false }
     if (opts.explore && this.quietStreak(userId)) {
       const mover = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id))
       const pick = mover[Math.floor(this.random() * mover.length)]
@@ -626,7 +638,7 @@ export class Store {
 
   alerts(userId: string) {
     const read = new Set((this.db.prepare('SELECT alert_id FROM alerts_read WHERE user_id = ?').all(userId) as { alert_id: string }[]).map((r) => r.alert_id))
-    const out: { id: string; type: 'new_data' | 'consensus' | 'finding' | 'badge' | 'level' | 'goal'; ref: string; detail: string; created_at: number; read: boolean }[] = []
+    const out: { id: string; type: 'new_data' | 'consensus' | 'finding' | 'finding_followed' | 'badge' | 'level' | 'goal'; ref: string; detail: string; created_at: number; read: boolean }[] = []
     const follows = this.db.prepare('SELECT object_id, created_at FROM follows WHERE user_id = ?').all(userId) as { object_id: string; created_at: number }[]
     for (const f of follows) {
       const o = this.objectsById.get(f.object_id)
@@ -637,7 +649,7 @@ export class Store {
       const s = this.swapCards.get(v.card_id)
       if (s && !s.gold && s.status !== 'open' && s.status !== 'real') out.push({ id: `consensus:${v.card_id}:${s.status}`, type: 'consensus', ref: v.card_id, detail: s.status, created_at: v.created_at, read: false })
     }
-    for (const e of this.findings.eventsForAlerts(userId)) out.push({ id: e.id, type: 'finding', ref: e.card_id, detail: e.state, created_at: e.created_at, read: false })
+    for (const e of this.findings.eventsForAlerts(userId)) out.push({ id: e.id, type: e.followed ? 'finding_followed' : 'finding', ref: e.card_id, detail: e.state, created_at: e.created_at, read: false })
     const badges = this.db.prepare('SELECT badge, created_at FROM badges WHERE user_id = ?').all(userId) as { badge: string; created_at: number }[]
     for (const b of badges) out.push({ id: `badge:${b.badge}`, type: 'badge', ref: b.badge, detail: b.badge, created_at: b.created_at, read: false })
     const level = levelFor(this.totalXp(userId)).current

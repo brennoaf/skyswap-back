@@ -162,7 +162,7 @@ export const DeckCardPublic = Type.Object(
 
 export const NextCardResponse = Type.Object({ done: Type.Boolean(), card: Nullable(DeckCardPublic), sky: Type.Boolean(), interesting: Type.Boolean() }, { $id: 'NextCardResponse' })
 
-export const NextCardQuery = Type.Object({ explore: Type.Optional(Type.Boolean()), known: Type.Optional(Type.Boolean()) })
+export const NextCardQuery = Type.Object({ explore: Type.Optional(Type.Boolean()), known: Type.Optional(Type.Boolean()), open: Type.Optional(Type.Boolean()) })
 
 export const SkyCardBody = Type.Object({
   ra: Type.Number({ minimum: 0, maximum: 360 }),
@@ -398,6 +398,18 @@ export const HealthResponse = Type.Object(
 
 export const ObjectsResponse = Type.Object({ objects: Type.Array(ObjectCard) }, { $id: 'ObjectsResponse' })
 
+export const FindingSocial = Type.Object(
+  {
+    interesting: Type.Integer(),
+    doubts: Type.Integer(),
+    doubt_reasons: Type.Object({ image_defect: Type.Integer(), known_asteroid: Type.Integer(), variable_star: Type.Integer(), other: Type.Integer() }),
+    also_seen: Type.Integer(),
+    blind_answers: Type.Integer(),
+    mine: Nullable(Type.Object({ interesting: Type.Boolean(), doubt: Nullable(Type.String()), second_look: Nullable(Type.String()), vote: Nullable(Type.String()), following: Type.Boolean() })),
+  },
+  { $id: 'FindingSocial' },
+)
+
 export const FindingSummary = Type.Object(
   {
     id: Type.String(),
@@ -417,6 +429,7 @@ export const FindingSummary = Type.Object(
     checks_total: Type.Integer(),
     credit_names: Type.Array(Type.String()),
     credit_others: Type.Integer(),
+    social: FindingSocial,
   },
   { $id: 'FindingSummary' },
 )
@@ -437,6 +450,36 @@ export const FindingDetail = Type.Object(
   },
   { $id: 'FindingDetail' },
 )
+
+export const CommunityOverview = Type.Object({ open_cards: Type.Integer(), highlight: Nullable(FindingSummary), has_popular: Type.Boolean() }, { $id: 'CommunityOverview' })
+
+export const FindingPeople = Type.Object(
+  {
+    interesting: Type.Array(Type.String()),
+    interesting_anonymous: Type.Integer(),
+    doubts: Type.Array(Type.Object({ name: Type.String(), reason: Type.String() })),
+    doubts_anonymous: Type.Integer(),
+    also_seen: Type.Array(Type.String()),
+    also_seen_anonymous: Type.Integer(),
+  },
+  { $id: 'FindingPeople' },
+)
+
+const DoubtReason = Type.Union([Type.Literal('image_defect'), Type.Literal('known_asteroid'), Type.Literal('variable_star'), Type.Literal('other')])
+
+export const ReactionBody = Type.Object(
+  {
+    kind: Type.Union([Type.Literal('interesting'), Type.Literal('doubt')]),
+    on: Type.Boolean(),
+    reason: Type.Optional(DoubtReason),
+    position: Type.Optional(Type.Object({ frame: Type.Integer({ minimum: 0, maximum: 64 }), x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }) }, { additionalProperties: false })),
+  },
+  { additionalProperties: false },
+)
+
+export const SecondLookBody = Type.Object({ choice: Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('unsure')]) }, { additionalProperties: false })
+
+export const FindingFollowBody = Type.Object({ on: Type.Boolean() }, { additionalProperties: false })
 
 export const MyCards = Type.Object(
   {

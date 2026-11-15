@@ -10,6 +10,7 @@ export interface Config {
   online: boolean
   cacheDir: string
   cacheBytes: number
+  avatarDir: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -23,5 +24,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     online: env.SKYSWAP_OFFLINE !== '1',
     cacheDir: env.SKYSWAP_CACHE_DIR ?? resolve(import.meta.dirname, '..', 'var', 'cutouts'),
     cacheBytes: Number(env.SKYSWAP_CACHE_MB ?? 512) * 1024 * 1024,
+    avatarDir: env.SKYSWAP_AVATAR_DIR ?? resolve(import.meta.dirname, '..', 'var', 'avatars'),
   }
 }

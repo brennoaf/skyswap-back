@@ -179,6 +179,25 @@ export const MIGRATIONS: string[] = [
      PRIMARY KEY (user_id, card_id)
    );`,
   `ALTER TABLE votes ADD COLUMN hints INTEGER;`,
+  `CREATE TABLE avatars (
+     id TEXT PRIMARY KEY,
+     nasa_id TEXT NOT NULL,
+     title TEXT NOT NULL,
+     date TEXT,
+     credit TEXT NOT NULL,
+     image_url TEXT NOT NULL,
+     width INTEGER NOT NULL,
+     height INTEGER NOT NULL,
+     cx REAL NOT NULL,
+     cy REAL NOT NULL,
+     side REAL NOT NULL,
+     rotation REAL NOT NULL,
+     bytes INTEGER NOT NULL,
+     owner_id TEXT UNIQUE REFERENCES users(id),
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX avatars_nasa ON avatars (nasa_id);
+   CREATE INDEX avatars_free ON avatars (owner_id) WHERE owner_id IS NULL;`,
 ]
 
 export function openDb(path: string): DB {

@@ -144,11 +144,19 @@ export const PostDetail = Type.Object(
 
 export const XpDto = Type.Object({ xp: Type.Integer(), streakBonus: Type.Integer(), streak: Type.Integer(), reason: Type.String() }, { $id: 'Xp' })
 
-export const UserDto = Type.Object({ id: Type.String(), nickname: Type.String(), created_at: Type.Number() }, { $id: 'User' })
+export const AvatarDto = Type.Object({ id: Type.String(), url: Type.String(), title: Type.String(), date: Nullable(Type.String()), credit: Type.String(), image_url: Type.String() })
+
+export const UserDto = Type.Object({ id: Type.String(), nickname: Type.String(), created_at: Type.Number(), avatar: Nullable(AvatarDto) }, { $id: 'User' })
 
 export const SessionResponse = Type.Object({ user: Nullable(UserDto) }, { $id: 'SessionResponse' })
 
-export const SessionBody = Type.Object({ nickname: Type.String({ minLength: 3, maxLength: 24, pattern: '^[A-Za-z0-9_.]+$' }) })
+export const SessionBody = Type.Object({ nickname: Type.String({ minLength: 3, maxLength: 24, pattern: '^[A-Za-z0-9_.]+$' }), avatar_id: Type.Optional(Type.String({ maxLength: 40 })) })
+
+export const AvatarOfferQuery = Type.Object({ not: Type.Optional(Type.String({ maxLength: 1200 })) })
+
+export const AvatarOffer = Type.Object({ avatars: Type.Array(AvatarDto) })
+
+export const AvatarBody = Type.Object({ avatar_id: Type.String({ maxLength: 40 }) })
 
 export const DeckCardPublic = Type.Object(
   {

@@ -6,7 +6,7 @@ import fastifyStatic from '@fastify/static'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Config } from './config.js'
@@ -20,6 +20,7 @@ import { socialRoutes } from './routes/social.js'
 import { classifyRoutes } from './routes/classify.js'
 import { communityRoutes } from './routes/community.js'
 import { makeChecker } from './checks.js'
+import { AvatarRefill, type RefillOptions } from './avatar-refill.js'
 
 export const SESSION_COOKIE = 'ss_session'
 const CHECK_RETRY_MS = 10 * 60_000
@@ -39,6 +40,7 @@ export interface AppDeps {
   random?: () => number
   fetchImpl?: typeof fetch
   cache?: DiskCache
+  refill?: RefillOptions
 }
 
 export async function buildApp(deps: AppDeps) {
@@ -80,6 +82,8 @@ export async function buildApp(deps: AppDeps) {
   if (existsSync(join(kit.dataDir, 'deck', 'media'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'deck', 'media'), prefix: '/kit/deck/', ...staticOpts })
   if (existsSync(join(kit.dataDir, 'index', 'tiles'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'index', 'tiles'), prefix: '/kit/index/tiles/', decorateReply: false, maxAge: 0, etag: true, lastModified: true })
   app.get('/kit/index/wave.json', { schema: { hide: true } }, async (_req, reply) => reply.header('cache-control', 'public, max-age=86400').send(kit.wave))
+  mkdirSync(config.avatarDir, { recursive: true })
+  await app.register(fastifyStatic, { root: config.avatarDir, prefix: '/kit/avatars/', decorateReply: false, maxAge: 30 * 86400 * 1000, immutable: true })
   const cellsPath = join(kit.dataDir, 'index', 'cells.json')
   app.get('/kit/index/cells.json', { schema: { hide: true } }, async (req, reply) => {
     if (!existsSync(cellsPath)) return reply.status(404).send({ error: 'not_found' })
@@ -96,8 +100,10 @@ export async function buildApp(deps: AppDeps) {
   store.findings.retryDue()
   const retry = setInterval(() => store.findings.retryDue(), CHECK_RETRY_MS)
   retry.unref()
+  const refill = new AvatarRefill(store.avatars, config.avatarDir, ctx.fetchImpl, deps.refill)
   app.addHook('onClose', async () => {
     clearInterval(retry)
+    await refill.stop()
     await store.findings.drain()
   })
   await app.register(contentRoutes, ctx)
@@ -106,7 +112,7 @@ export async function buildApp(deps: AppDeps) {
   await app.register(communityRoutes, ctx)
 
   await app.ready()
-  return { app, store, kit, db, cache }
+  return { app, store, kit, db, cache, refill }
 }
 
 export function requireUser(req: FastifyRequest, reply: FastifyReply): User | null {

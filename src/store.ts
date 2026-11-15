@@ -1,5 +1,6 @@
 import { EXAMPLE_PREFIX, Findings, type FindingCard } from './findings.js'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { Avatars, type AvatarDto } from './avatars.js'
 import type { DB } from './db.js'
 import { EXPLORE_ORDER, mjdIso, QUIET_STREAK, skyCardId, skyVisits, WARMUP_CARDS, WARMUP_KNOWN_SHARE, type SkyCard, type SkyFrame } from './explore.js'
 import { ang2pixNest } from './healpix.js'
@@ -31,6 +32,7 @@ export interface User {
   id: string
   nickname: string
   created_at: number
+  avatar: AvatarDto | null
 }
 
 export type Choice = 'moves' | 'still' | 'unsure'
@@ -58,6 +60,7 @@ export class Store {
   private objectsById: Map<string, ObjectSummary>
   private skyCards = new Map<string, SkyCard>()
   readonly findings: Findings
+  readonly avatars: Avatars
   private deckCells = new Map<string, number>()
 
   constructor(readonly db: DB, readonly kit: Kit, private readonly now: () => number = Date.now, private readonly random: () => number = Math.random) {
@@ -66,6 +69,7 @@ export class Store {
     this.loadSkyCards()
     this.backfillCells()
     this.rebuildSwap()
+    this.avatars = new Avatars(db, this.now)
     this.findings = new Findings(db, this.now, {
       status: (id) => this.swapCards.get(id)?.status,
       card: (id) => this.findingCard(id),
@@ -179,17 +183,25 @@ export class Store {
     for (const r of rows) if (this.swapCards.has(r.card_id)) applyVote(this.swapUsers, this.swapCards, r.user_id, r.card_id, r.label)
   }
 
-  createUser(nickname: string): { user: User; token: string } {
+  createUser(nickname: string, avatarId?: string): { user: User; token: string } {
     const clean = nickname.trim()
     if (!/^[A-Za-z0-9_.]{3,24}$/.test(clean)) throw new HttpError(400, 'invalid_nickname')
     const exists = this.db.prepare('SELECT 1 FROM users WHERE nickname = ?').get(clean)
     if (exists) throw new HttpError(409, 'nickname_taken')
-    const user: User = { id: randomUUID(), nickname: clean, created_at: this.now() }
+    const user: User = { id: randomUUID(), nickname: clean, created_at: this.now(), avatar: null }
     const token = this.db.transaction(() => {
       this.db.prepare("INSERT INTO users (id, nickname, token_hash, created_at) VALUES (?, ?, '', ?)").run(user.id, user.nickname, user.created_at)
+      if (avatarId && !this.avatars.choose(user.id, avatarId)) throw new HttpError(409, 'avatar_taken')
       return this.createSession(user.id)
     })()
-    return { user, token }
+    return { user: { ...user, avatar: this.avatars.ofUser(user.id) }, token }
+  }
+
+  setAvatar(user: User, avatarId: string): User {
+    this.db.transaction(() => {
+      if (!this.avatars.choose(user.id, avatarId)) throw new HttpError(409, 'avatar_taken')
+    })()
+    return { ...user, avatar: this.avatars.ofUser(user.id) }
   }
 
   createSession(userId: string): string {
@@ -210,7 +222,7 @@ export class Store {
   userByToken(token: string | undefined): User | null {
     if (!token) return null
     const row = this.db.prepare('SELECT u.id, u.nickname, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?').get(hashToken(token)) as User | undefined
-    return row ? { id: row.id, nickname: row.nickname, created_at: row.created_at } : null
+    return row ? { id: row.id, nickname: row.nickname, created_at: row.created_at, avatar: this.avatars.ofUser(row.id) } : null
   }
 
   private dayState(userId: string): DayState {
@@ -604,7 +616,7 @@ export class Store {
     const count = (sql: string) => (this.db.prepare(sql).get(user.id) as { n: number }).n
     const streak = st.lastActiveDay === st.day || (st.lastActiveDay && Date.parse(st.day) - Date.parse(st.lastActiveDay) <= 86400000) ? st.streak : 0
     return {
-      user: { id: user.id, nickname: user.nickname, created_at: user.created_at },
+      user: { id: user.id, nickname: user.nickname, created_at: user.created_at, avatar: user.avatar },
       xp,
       xp_today: st.xpToday,
       daily_cap: DAILY_CAP,

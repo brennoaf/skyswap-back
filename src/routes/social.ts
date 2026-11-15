@@ -8,12 +8,14 @@ import type { User } from '../store.js'
 import type { RouteCtx } from './content.js'
 
 const COOKIE_OPTS = { path: '/', httpOnly: true, sameSite: 'lax' as const, maxAge: 60 * 60 * 24 * 365 }
+const OFFER_SIZE = 3
+const MAX_NOT = 30
 
 export const socialRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { store }) => {
   app.get('/api/session', { schema: { tags: ['session'], response: { 200: S.SessionResponse } } }, async (req) => ({ user: req.user }))
 
   app.post('/api/session', { schema: { tags: ['session'], body: S.SessionBody, response: { 200: S.SessionResponse, 409: S.ErrorBody } }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const { user, token } = store.createUser(req.body.nickname)
+    const { user, token } = store.createUser(req.body.nickname, req.body.avatar_id)
     reply.setCookie(SESSION_COOKIE, token, COOKIE_OPTS)
     return { user }
   })
@@ -22,6 +24,17 @@ export const socialRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { s
     store.endSession(req.cookies[SESSION_COOKIE])
     reply.clearCookie(SESSION_COOKIE, { path: '/' })
     return { user: null }
+  })
+
+  app.get('/api/avatars/offer', { schema: { tags: ['session'], querystring: S.AvatarOfferQuery, response: { 200: S.AvatarOffer } }, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
+    reply.header('cache-control', 'no-store')
+    return { avatars: store.avatars.offer(OFFER_SIZE, (req.query.not ?? '').split(',').filter(Boolean).slice(0, MAX_NOT)) }
+  })
+
+  app.put('/api/me/avatar', { schema: { tags: ['me'], body: S.AvatarBody, response: { 200: S.SessionResponse, 401: S.ErrorBody, 409: S.ErrorBody } }, config: writeLimit }, async (req, reply) => {
+    const user = requireUser(req, reply)
+    if (!user) return reply
+    return { user: store.setAvatar(user, req.body.avatar_id) }
   })
 
   app.post(

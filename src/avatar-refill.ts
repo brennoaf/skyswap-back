@@ -54,7 +54,9 @@ export const LIST_QUERIES = [
 const BLOCKED_IDS = new Set<string>()
 const BLOCKED_WORDS =
   /team|engineer|astronaut|technician|conference|audience|briefing|portrait|workers|ceremony|mirror|servicing|shuttle|launch|crew|administrator|scientist|clean ?room|logo|infographic|chart|diagram|illustration|artist|concept|poster|anniversary|telescope (is|being)|spacecraft|observatory|hearing|visit|screening|auditorium|embassy|campus|cinema|memorial|\bevent\b|award|facility|cryogenic|assembly|testing|\btest\b|history of/i
-const PLACES_NOT_SKY = new Set(['HQ', 'KSC', 'JSC'])
+const PLACES_NOT_SKY = new Set(['HQ', 'KSC', 'JSC', 'MSFC'])
+const NOT_A_PHOTO = /artist.{0,3}s? (concept|impression|rendering|illustration)|\billustration (shows|of|depicts)\b|this (illustration|diagram|chart|graph|plot)\b|\b(left|right|top|bottom|middle) panel\b|\bpanels\b|\binset\b/i
+const ENTITIES: Record<string, string> = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ', '#39': "'" }
 const PHOTO_LAB_ID = /^(KSC-|NHQ|\d+HQ$|GSFC_\d{8}_\d{4}-\d)/
 const THIRD_PARTY = /copyright|©|\(c\)\s|all rights reserved|courtesy of|getty|reuters|associated press|\bap photo\b/i
 const CREDIT = /\b(?:image\s+)?credits?\s*:\s*(.+?)(?:\s{2,}|\n|<|$)/i
@@ -114,9 +116,11 @@ export interface RefillOptions {
 
 class NasaUnavailable extends Error {}
 
+const decode = (text: string) => text.replace(/&(amp|quot|apos|lt|gt|nbsp|#39);/g, (_, name: string) => ENTITIES[name] ?? '')
+
 function plainCredit(item: NasaItem): string | null {
   const found = CREDIT.exec(item.description ?? '')?.[1]?.trim()
-  return found ? found.replace(/\s+acknowledge?ment.*$/i, '').replace(/[.\s]+$/, '') : null
+  return found ? decode(found).replace(/\s+acknowledge?ment.*$/i, '').replace(/[.,;\s]+$/, '') : null
 }
 
 export function cutReason(item: NasaItem): string | null {
@@ -127,6 +131,7 @@ export function cutReason(item: NasaItem): string | null {
   if ([item.title, item.description, item.photographer, item.secondary_creator].some((text) => text && THIRD_PARTY.test(text))) return 'third_party'
   const credit = plainCredit(item)
   if (credit && !AGENCY.test(credit)) return 'third_party'
+  if (item.description && NOT_A_PHOTO.test(item.description)) return 'not_a_photo'
   return null
 }
 
@@ -445,7 +450,7 @@ export class AvatarRefill {
     writeFileSync(path, jpeg)
     try {
       const date = /^\d{4}-\d\d-\d\d/.exec(item.date_created ?? '')?.[0] ?? null
-      this.avatars.add({ id, nasa_id: item.nasa_id, title: (item.title ?? '').slice(0, 200), date, credit: creditFor(item), image_url: whole, width, height, ...spot, bytes: jpeg.length })
+      this.avatars.add({ id, nasa_id: item.nasa_id, title: decode(item.title ?? '').slice(0, 200), date, credit: creditFor(item), image_url: whole, width, height, ...spot, bytes: jpeg.length })
     } catch (err) {
       rmSync(path, { force: true })
       throw err

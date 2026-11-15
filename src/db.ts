@@ -198,6 +198,7 @@ export const MIGRATIONS: string[] = [
    );
    CREATE INDEX avatars_nasa ON avatars (nasa_id);
    CREATE INDEX avatars_free ON avatars (owner_id) WHERE owner_id IS NULL;`,
+  `ALTER TABLE avatars ADD COLUMN retired INTEGER NOT NULL DEFAULT 0;`,
 ]
 
 export function openDb(path: string): DB {

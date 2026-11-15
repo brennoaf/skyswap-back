@@ -37,14 +37,14 @@ export class Avatars {
   ) {}
 
   freeCount(): number {
-    return (this.db.prepare('SELECT COUNT(*) AS n FROM avatars WHERE owner_id IS NULL').get() as { n: number }).n
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM avatars WHERE owner_id IS NULL AND retired = 0').get() as { n: number }).n
   }
 
   private draw(count: number, not: string[]): Row[] {
     const marks = not.map(() => '?').join(',')
     return this.db
       .prepare(
-        `SELECT ${COLUMNS} FROM (SELECT * FROM avatars WHERE owner_id IS NULL AND id NOT IN (${marks}) ORDER BY RANDOM()) GROUP BY nasa_id ORDER BY RANDOM() LIMIT ?`,
+        `SELECT ${COLUMNS} FROM (SELECT * FROM avatars WHERE owner_id IS NULL AND retired = 0 AND id NOT IN (${marks}) ORDER BY RANDOM()) GROUP BY nasa_id ORDER BY RANDOM() LIMIT ?`,
       )
       .all(...not, count) as Row[]
   }
@@ -64,7 +64,7 @@ export class Avatars {
   }
 
   inStock(nasaId: string, title: string): boolean {
-    return !!this.db.prepare('SELECT 1 FROM avatars WHERE owner_id IS NULL AND (nasa_id = ? OR title = ? COLLATE NOCASE) LIMIT 1').get(nasaId, title)
+    return !!this.db.prepare('SELECT 1 FROM avatars WHERE owner_id IS NULL AND retired = 0 AND (nasa_id = ? OR title = ? COLLATE NOCASE) LIMIT 1').get(nasaId, title)
   }
 
   add(a: NewAvatar): void {
@@ -78,6 +78,6 @@ export class Avatars {
 
   choose(userId: string, avatarId: string): boolean {
     this.db.prepare('UPDATE avatars SET owner_id = NULL WHERE owner_id = ?').run(userId)
-    return this.db.prepare('UPDATE avatars SET owner_id = ? WHERE id = ? AND owner_id IS NULL').run(userId, avatarId).changes === 1
+    return this.db.prepare('UPDATE avatars SET owner_id = ? WHERE id = ? AND owner_id IS NULL AND retired = 0').run(userId, avatarId).changes === 1
   }
 }

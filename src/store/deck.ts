@@ -431,7 +431,7 @@ export class Deck extends StorePart {
       this.q('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
       const newBadges: BadgeKey[] = []
       if (counted && this.xp.grantBadge(userId, 'first_vote')) newBadges.push('first_vote')
-      return { xp, counted, guided, first: counted && label === 'real' && none, newBadges }
+      return { xp, counted, guided, first: counted && label === 'real' && none && !card?.known, newBadges }
     })()
     const gold = card?.gold ?? null
     let outcome = { gold, correct: null as boolean | null, bits: 0 }
@@ -445,6 +445,7 @@ export class Deck extends StorePart {
   }
 
   private isFirstYes(userId: string, cardId: string): boolean {
+    if (this.kit.deckById.get(cardId)?.known) return false
     const row = this.q("SELECT user_id FROM votes WHERE card_id = ? AND counted = 1 AND label = 'real' ORDER BY id LIMIT 1").get(cardId) as { user_id: string } | undefined
     return row?.user_id === userId
   }

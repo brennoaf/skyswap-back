@@ -11,13 +11,16 @@ const NIGHT_DAYS = 1
 const WISE_W2_UM = 4.6
 
 type Mark = { x: number; y: number }
+export type StoryFeature = { name_pt: string; name_en: string }
+export const STORY_FEATURES = 3
+
 export type StoryFrame = { src: string; t: string; telescope: string | null; mark: Mark | null }
 
 export type StoryScreen =
   | { kind: 'blink'; topic: 'years' | 'passes' | 'night' | 'brightness'; band: string | null; wavelength_um: number | null; fixed: boolean; frames: StoryFrame[] }
   | { kind: 'still'; topic: 'difference'; band: string | null; src: string; hours: number | null }
   | { kind: 'curve'; band: string; saturated: boolean; points: { t: string; mag: number; err: number }[] }
-  | { kind: 'colours'; frames: { band: string; src: string; um: [number, number] | null; mark: Mark | null }[]; signal: (number | null)[] }
+  | { kind: 'colours'; frames: { band: string; src: string; um: [number, number] | null; mark: Mark | null }[]; signal: (number | null)[]; features: StoryFeature[] }
   | { kind: 'end'; motion: { measured_arcsec: number; err_arcsec: number; predicted_arcsec: number; days: number } | null; images: number; passes: number }
 
 export function spread<T>(items: T[], max = STORY_MAX_FRAMES): T[] {
@@ -92,7 +95,16 @@ function brightnessScreens(kit: Kit, profile: ObjectProfile, posts: Post[]): Sto
   return out
 }
 
-function coloursScreen(profile: ObjectProfile, posts: Post[]): StoryScreen | null {
+type FeaturesFile = { judged?: boolean; features?: { name_pt: string; name_en: string; sigma?: number }[] }
+
+export function featureNames(file: FeaturesFile | null): StoryFeature[] {
+  if (!file?.judged) return []
+  const out: StoryFeature[] = []
+  for (const f of file.features ?? []) if (f.name_pt && f.name_en && !out.some((o) => o.name_en === f.name_en)) out.push({ name_pt: f.name_pt, name_en: f.name_en })
+  return out.slice(0, STORY_FEATURES)
+}
+
+function coloursScreen(kit: Kit, profile: ObjectProfile, posts: Post[]): StoryScreen | null {
   const post = posts.find((p) => p.type === 'band_compare' && p.frames.length)
   if (!post) return null
   const byBand = BANDS.map((band) => post.frames.find((f) => f.band === band)).filter((f): f is Frame => !!f)
@@ -104,6 +116,7 @@ function coloursScreen(profile: ObjectProfile, posts: Post[]): StoryScreen | nul
       const v = profile.band_stats?.[b]?.snr_pass
       return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : null
     }),
+    features: featureNames(readScience<FeaturesFile>(kit, profile.id, profile.measurements?.features)),
   }
 }
 
@@ -136,7 +149,7 @@ export function buildStoryScreens(kit: Kit, id: string): StoryScreen[] {
   if (!profile) return []
   const posts = kit.postsByObject.get(id) ?? []
   const lead = SOLAR.has(profile.kind) ? solarScreens(posts) : BRIGHTNESS.has(profile.kind) ? brightnessScreens(kit, profile, posts) : [motionScreen(posts)].filter((s): s is StoryScreen => !!s)
-  const colours = coloursScreen(profile, posts)
+  const colours = coloursScreen(kit, profile, posts)
   const moving = !SOLAR.has(profile.kind) && !BRIGHTNESS.has(profile.kind)
   const motion = moving ? motionSummary(readScience<MotionFile>(kit, id, profile.measurements?.motion)) : null
   const body = [...lead.slice(0, 2), ...(colours ? [colours] : [])]

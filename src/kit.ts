@@ -41,7 +41,7 @@ export interface ObjectProfile extends ObjectSummary {
   bio: string
   facts: Fact[]
   sources: Source[]
-  measurements: { motion?: string; lightcurve?: string; spectra?: string }
+  measurements: { motion?: string; lightcurve?: string; spectra?: string; features?: string; halo?: string }
   limits: string[]
   field: { fov_deg: number; ra: number | null; dec: number | null }
   band_stats?: Record<string, { snr_pass?: number | null; found_frac?: number | null }>
@@ -156,7 +156,10 @@ export function loadKit(dataDir: string): Kit {
   for (const o of objects) {
     const dir = join(dataDir, 'objects', o.id)
     const profilePath = join(dir, 'profile.json')
-    profiles.set(o.id, existsSync(profilePath) ? { ...o, ...readJson<ObjectProfile>(profilePath) } : (o as ObjectProfile))
+    const profile = existsSync(profilePath) ? { ...o, ...readJson<ObjectProfile>(profilePath) } : (o as ObjectProfile)
+    const measurements = { ...(profile.measurements ?? {}) }
+    for (const key of ['features', 'halo'] as const) if (!measurements[key] && existsSync(join(dir, 'science', `${key}.json`))) measurements[key] = `science/${key}.json`
+    profiles.set(o.id, { ...profile, measurements })
     const postsPath = join(dir, 'posts.json')
     const list = orderPosts(existsSync(postsPath) ? readJson<Omit<Post, 'object_id'>[]>(postsPath).map((p) => ({ ...p, object_id: o.id })) : [])
     postsByObject.set(o.id, list)

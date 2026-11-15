@@ -97,6 +97,7 @@ export const StoryScreen = Type.Union(
       kind: Type.Literal('colours'),
       frames: Type.Array(Type.Object({ band: Type.String(), src: Type.String(), um: Nullable(Type.Array(Type.Number())), mark: StoryMark })),
       signal: Type.Array(Nullable(Type.Number())),
+      features: Type.Array(Type.Object({ name_pt: Type.String(), name_en: Type.String() })),
     }),
     Type.Object({
       kind: Type.Literal('end'),
@@ -140,7 +141,7 @@ export const ObjectProfileDto = Type.Object(
     bio: Type.String(),
     facts: Type.Array(Type.Object({ label: Type.String(), value: Type.Union([Type.Number(), Type.String()]), unit: Nullable(Type.String()), source_id: Type.String() })),
     sources: Type.Array(Type.Object({ id: Type.String(), label: Type.String(), url: Type.String() })),
-    measurements: Type.Object({ motion: Type.Optional(Type.String()), lightcurve: Type.Optional(Type.String()), spectra: Type.Optional(Type.String()) }),
+    measurements: Type.Object({ motion: Type.Optional(Type.String()), lightcurve: Type.Optional(Type.String()), spectra: Type.Optional(Type.String()), features: Type.Optional(Type.String()), halo: Type.Optional(Type.String()) }),
     limits: Type.Array(Type.String()),
     field: Type.Object({ fov_deg: Type.Number(), ra: Nullable(Type.Number()), dec: Nullable(Type.Number()) }),
     pack: Nullable(Type.String()),

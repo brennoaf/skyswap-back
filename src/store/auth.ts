@@ -79,7 +79,7 @@ export class Auth extends StorePart {
     devices.sort((a, b) => Number(b.current) - Number(a.current))
     const passkeys = (this.q('SELECT COUNT(*) AS n FROM passkeys WHERE user_id = ?').get(userId) as { n: number }).n
     const recovery = !!this.q('SELECT 1 FROM recovery_codes WHERE user_id = ?').get(userId)
-    const answers = (this.q('SELECT COUNT(*) AS n FROM votes WHERE user_id = ? AND practice = 0').get(userId) as { n: number }).n
+    const answers = (this.q('SELECT COUNT(*) AS n FROM votes WHERE user_id = ? AND counted = 1').get(userId) as { n: number }).n
     return { passkeys, recovery, answers, devices }
   }
 

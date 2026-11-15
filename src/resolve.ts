@@ -121,20 +121,34 @@ export async function resolveName(query: string, opts: { fetchImpl?: Fetch; now?
   return null
 }
 
+const DECIMAL_PAIR = /^\+?(\d+(?:\.\d+)?)\s*°?\s+([+-]?\d+(?:\.\d+)?)\s*°?$/
+const SEXA_PAIR = /^(\d{1,2})\s*(?:h|:|\s)\s*(\d{1,2})\s*(?:m|:|'|\s)\s*(\d{1,2}(?:\.\d+)?)\s*s?\s*([+-]?)\s*(\d{1,2})\s*(?:d|°|:|\s)\s*(\d{1,2})\s*(?:m|'|:|\s)\s*(\d{1,2}(?:\.\d+)?)\s*(?:s|")?$/i
+
+function normalizeCoordinates(q: string): string {
+  return q
+    .trim()
+    .replace(/[\u2212\u2012\u2013\u2014]/g, '-')
+    .replace(/[\u2032\u2019\u00b4]/g, "'")
+    .replace(/[\u2033\u201d]|''/g, '"')
+    .replace(/(^|[\s,;])(?:ra|dec|\u03b1|\u03b4)(?![a-z])\s*[:=]?\s*/gi, '$1 ')
+    .replace(/[,;]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function parseCoordinates(q: string): { ra: number; dec: number } | null {
-  const s = q.trim().replace(/[,;]/g, ' ').replace(/\s+/g, ' ')
-  const dec2 = /^(-?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)$/.exec(s)
+  const s = normalizeCoordinates(q)
+  const dec2 = DECIMAL_PAIR.exec(s)
   if (dec2) {
     const ra = Number(dec2[1])
     const dec = Number(dec2[2])
     return ra >= 0 && ra < 360 && dec >= -90 && dec <= 90 ? { ra, dec } : null
   }
-  const sexa = /^(\d{1,2})[h:\s](\d{1,2})[m:\s](\d{1,2}(?:\.\d+)?)s?\s+([+-]?)(\d{1,2})[d°:\s](\d{1,2})['m:\s](\d{1,2}(?:\.\d+)?)["s]?$/i.exec(s)
-  if (sexa) {
-    const [, h, m, sec, sign, d, dm, ds] = sexa
-    const ra = 15 * (Number(h) + Number(m) / 60 + Number(sec) / 3600)
-    const dec = (sign === '-' ? -1 : 1) * (Number(d) + Number(dm) / 60 + Number(ds) / 3600)
-    return ra >= 0 && ra < 360 && dec >= -90 && dec <= 90 ? { ra, dec } : null
-  }
-  return null
+  const sexa = SEXA_PAIR.exec(s)
+  if (!sexa) return null
+  const [h, m, sec, d, dm, ds] = [sexa[1], sexa[2], sexa[3], sexa[5], sexa[6], sexa[7]].map(Number) as [number, number, number, number, number, number]
+  if (h >= 24 || m >= 60 || sec >= 60 || dm >= 60 || ds >= 60) return null
+  const ra = 15 * (h + m / 60 + sec / 3600)
+  const dec = (sexa[4] === '-' ? -1 : 1) * (d + dm / 60 + ds / 3600)
+  return ra >= 0 && ra < 360 && dec >= -90 && dec <= 90 ? { ra, dec } : null
 }

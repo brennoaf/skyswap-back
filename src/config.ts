@@ -13,6 +13,8 @@ export interface Config {
   indexWorker: boolean
   avatarDir: string
   logLevel: LogLevel
+  rpId: string
+  origins: string[]
 }
 
 const LOG_LEVELS = ['error', 'warn', 'info', 'silent'] as const
@@ -32,5 +34,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     indexWorker: env.SKYSWAP_INDEX_WORKER ? env.SKYSWAP_INDEX_WORKER !== '0' : !env.VITEST,
     avatarDir: env.SKYSWAP_AVATAR_DIR ?? resolve(import.meta.dirname, '..', 'var', 'avatars'),
     logLevel: LOG_LEVELS.find((l) => l === env.SKYSWAP_LOG) ?? 'error',
+    rpId: env.SKYSWAP_RP_ID ?? 'localhost',
+    origins: (env.SKYSWAP_ORIGIN ?? 'http://localhost:3000').split(',').map((o) => o.trim()).filter(Boolean),
   }
 }

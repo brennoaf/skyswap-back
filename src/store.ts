@@ -2,6 +2,7 @@ import { Avatars } from './avatars.js'
 import type { DB } from './db.js'
 import type { Findings } from './findings.js'
 import type { Kit, ObjectSummary } from './kit.js'
+import { Auth } from './store/auth.js'
 import { Deck } from './store/deck.js'
 import { Sessions } from './store/sessions.js'
 import { Social } from './store/social.js'
@@ -12,6 +13,7 @@ export * from './store/base.js'
 export class Store {
   readonly avatars: Avatars
   readonly findings: Findings
+  readonly auth: Auth
   private readonly objects: Map<string, ObjectSummary>
   private readonly sessions: Sessions
   private readonly xp: Xp
@@ -23,6 +25,7 @@ export class Store {
     this.objects = new Map(kit.objects.map((o) => [o.id, o]))
     const ctx = { db, kit, now, random, avatars: this.avatars, objects: this.objects }
     this.sessions = new Sessions(ctx)
+    this.auth = new Auth(ctx, this.sessions)
     this.xp = new Xp(ctx, this.sessions)
     this.deck = new Deck(ctx, this.xp)
     this.social = new Social(ctx, this.xp, this.deck)

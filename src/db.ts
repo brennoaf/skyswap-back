@@ -232,6 +232,8 @@ export const MIGRATIONS: string[] = [
      PRIMARY KEY (user_id, card_id)
    );
    INSERT OR IGNORE INTO card_firsts (user_id, card_id, first_at) SELECT user_id, card_id, issued_at FROM card_issues;`,
+  `ALTER TABLE votes ADD COLUMN positions TEXT;
+   ALTER TABLE votes ADD COLUMN track_ok INTEGER;`,
 ]
 
 const statements = new WeakMap<DB, Map<string, Database.Statement>>()

@@ -1,4 +1,4 @@
-import { EXAMPLE_PREFIX, Findings, type FindingCard } from '../findings.js'
+import { EXAMPLE_PREFIX, Findings, type CrowdMark, type FindingCard } from '../findings.js'
 import {
   EXPLORE_ORDER,
   GOLD_CLASS_LEAD,
@@ -26,6 +26,7 @@ import { cleanNote } from '../notes.js'
 import { applyVote, goldRate, MAX_VOTES, MIN_PHOTOS_TO_CONFIRM, SwapCard, SwapUser, type CardStatus, type Label } from '../swap.js'
 import { CHOICE_LABEL, HttpError, StorePart, type Choice, type NextSlot, type StoreContext, type VotePosition } from './base.js'
 import type { Xp } from './xp.js'
+import { steadyTrack, type StoredMark } from '../marks.js'
 
 const OUTCOME: Record<string, 'open' | 'moves' | 'still' | 'undecided'> = { open: 'open', real: 'moves', artifact: 'still', inconclusive: 'undecided' }
 
@@ -65,6 +66,7 @@ export class Deck extends StorePart {
       status: (id) => this.cardStatus(id),
       card: (id) => this.findingCard(id),
       positions: (id) => this.votedPositions(id),
+      marks: (id) => this.crowdMarks(id),
       dataVersion: this.kit.manifest?.version ?? 'unknown',
     })
     this.findings.syncAll(this.swapCards.keys())
@@ -80,22 +82,29 @@ export class Deck extends StorePart {
     if (deck) {
       if (deck.gold) return null
       const t0 = deck.frames[0]?.mjd ?? 0
-      return { id: cardId, kind: 'deck', ra: deck.ra, dec: deck.dec, fov_deg: deck.size_arcmin / 60, band: deck.band.replace('SPHEREx-', ''), mjds: deck.frames.map((f) => f.mjd), sprite: `/kit/deck/${deck.sprite.split('/').pop() ?? ''}`, offsets_s: deck.frames.map((f) => Math.round((f.mjd - t0) * 86400)), known: deck.known ? this.knownName(deck.known.name) : null }
+      return { id: cardId, kind: 'deck', ra: deck.ra, dec: deck.dec, fov_deg: deck.size_arcmin / 60, band: deck.band.replace('SPHEREx-', ''), mjds: deck.frames.map((f) => f.mjd), sprite: `/kit/deck/${deck.sprite.split('/').pop() ?? ''}`, offsets_s: deck.frames.map((f) => Math.round((f.mjd - t0) * 86400)), known: deck.known ? this.knownName(deck.known.name) : null, size_px: deck.size_px, wcs: deck.wcs ?? null }
     }
     const sky = this.skyCards.get(cardId)
     if (!sky) return null
     const visits = skyVisits(sky.frames)
     const t0 = visits[0]?.mjd ?? 0
-    return { id: cardId, kind: 'sky', ra: sky.ra, dec: sky.dec, fov_deg: sky.fov_deg, band: sky.band, mjds: visits.map((v) => v.mjd), sprite: null, offsets_s: visits.map((v) => Math.round((v.mjd - t0) * 86400)), known: null }
+    return { id: cardId, kind: 'sky', ra: sky.ra, dec: sky.dec, fov_deg: sky.fov_deg, band: sky.band, mjds: visits.map((v) => v.mjd), sprite: null, offsets_s: visits.map((v) => Math.round((v.mjd - t0) * 86400)), known: null, size_px: sky.size_px, wcs: null }
+  }
+
+  crowdMarks(cardId: string): CrowdMark[] {
+    const rows = this.q("SELECT user_id, position, positions FROM votes WHERE card_id = ? AND counted = 1 AND label = 'real' AND (track_ok IS NULL OR track_ok = 1) AND (position IS NOT NULL OR positions IS NOT NULL)").all(cardId) as { user_id: string; position: string | null; positions: string | null }[]
+    return rows.flatMap((r) => {
+      if (r.positions) return (JSON.parse(r.positions) as (StoredMark | null)[]).flatMap((m, frame) => (m ? [{ user: r.user_id, frame, x: m.ax, y: m.ay }] : []))
+      const p = JSON.parse(r.position as string) as VotePosition
+      return [{ user: r.user_id, ...p }]
+    })
   }
 
   votedPositions(cardId: string): { mjd: number; ra: number; dec: number }[] {
     const sky = this.skyCards.get(cardId)
     if (!sky) return []
-    const rows = this.q("SELECT position FROM votes WHERE card_id = ? AND counted = 1 AND label = 'real' AND position IS NOT NULL").all(cardId) as { position: string }[]
     const byFrame = new Map<number, VotePosition[]>()
-    for (const r of rows) {
-      const p = JSON.parse(r.position) as VotePosition
+    for (const p of this.crowdMarks(cardId)) {
       const list = byFrame.get(p.frame)
       if (list) list.push(p)
       else byFrame.set(p.frame, [p])
@@ -249,8 +258,12 @@ export class Deck extends StorePart {
     return (this.q('SELECT COUNT(*) AS n FROM votes WHERE user_id = ?').get(userId) as { n: number }).n
   }
 
+  private servable(card: DeckCard): boolean {
+    return !EXAMPLE_IDS.has(card.id) && card.n_frames >= (this.kit.manifest.deck_min_frames ?? 0)
+  }
+
   private isOpenDeckCard(card: DeckCard, seen: Set<string>): boolean {
-    return !card.gold && !EXAMPLE_IDS.has(card.id) && !seen.has(card.id) && this.cardStatus(card.id) === 'open'
+    return !card.gold && this.servable(card) && !seen.has(card.id) && this.cardStatus(card.id) === 'open'
   }
 
   private canClose(card: DeckCard, seen: Set<string>): boolean {
@@ -270,7 +283,7 @@ export class Deck extends StorePart {
     const canExplore = !!opts.explore && !opts.known && this.kit.indexCells.length > 0
     if (opts.open && this.kit.deck.some((c) => this.canClose(c, seen))) return { card: this.pickKnown(userId, seen, goldRate(n), false, true), sky: false, spot: null }
     if (opts.explore && this.quietStreak(userId)) {
-      const movers = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id) && !EXAMPLE_IDS.has(c.id))
+      const movers = this.kit.deck.filter((c) => c.kind === 'mover' && c.gold === 'real' && !seen.has(c.id) && this.servable(c))
       const pick = movers[Math.floor(this.random() * movers.length)]
       if (pick) {
         this.issueCard(userId, pick.id)
@@ -296,7 +309,7 @@ export class Deck extends StorePart {
     const served: Record<Gold, number> = { real: 0, artifact: 0 }
     const open: DeckCard[] = []
     for (const c of this.kit.deck) {
-      if (EXAMPLE_IDS.has(c.id)) continue
+      if (!this.servable(c)) continue
       if (!c.gold) {
         if (closable ? this.canClose(c, seen) : this.isOpenDeckCard(c, seen)) open.push(c)
       } else if (seen.has(c.id)) served[c.gold] += 1
@@ -317,7 +330,7 @@ export class Deck extends StorePart {
   private goldPool(gold: Record<Gold, DeckCard[]>, served: Record<Gold, number>, balanced: boolean): DeckCard[] {
     const other = (g: Gold): Gold => (g === 'real' ? 'artifact' : 'real')
     const first: Gold = served.real < served.artifact ? 'real' : served.artifact < served.real ? 'artifact' : this.random() < 0.5 ? 'real' : 'artifact'
-    for (const g of [first, other(first)]) if (gold[g].length && (!balanced || served[g] - served[other(g)] < GOLD_CLASS_LEAD)) return gold[g]
+    for (const g of [first, other(first)]) if (gold[g].length && (!balanced || !gold[other(g)].length || served[g] - served[other(g)] < GOLD_CLASS_LEAD)) return gold[g]
     return []
   }
 
@@ -354,7 +367,7 @@ export class Deck extends StorePart {
 
   sharedCard(userId: string, cardId: string): { card: DeckCard; answered: 'moves' | 'still' | 'glitch' | 'unsure' | null } | null {
     const card = this.kit.deckById.get(cardId)
-    if (!card || EXAMPLE_IDS.has(cardId)) return null
+    if (!card || !this.servable(card)) return null
     const past = this.q('SELECT label, glitch FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { label: Label; glitch: number | null } | undefined
     if (past) return { card, answered: past.glitch ? 'glitch' : past.label === 'real' ? 'moves' : past.label === 'artifact' ? 'still' : 'unsure' }
     this.issueCard(userId, cardId, false, true)
@@ -369,7 +382,7 @@ export class Deck extends StorePart {
       return a && b ? Math.hypot(a.u - b.u, a.v - b.v) : 0
     }
     const snr = (c: DeckCard) => c.pipeline.snr ?? 0
-    const pick = (test: (c: DeckCard) => boolean, order: (a: DeckCard, b: DeckCard) => number) => this.kit.deck.filter((c) => test(c) && !voted.has(c.id) && !EXAMPLE_IDS.has(c.id)).sort((a, b) => Number(issued.has(b.id)) - Number(issued.has(a.id)) || order(a, b))[0]
+    const pick = (test: (c: DeckCard) => boolean, order: (a: DeckCard, b: DeckCard) => number) => this.kit.deck.filter((c) => test(c) && !voted.has(c.id) && this.servable(c)).sort((a, b) => Number(issued.has(b.id)) - Number(issued.has(a.id)) || order(a, b))[0]
     const plan = [
       { lesson: 'moves' as const, card: pick((c) => c.kind === 'mover' && c.gold === 'real' && (c.marks?.length ?? 0) >= 2, (a, b) => a.n_frames - b.n_frames || jump(b) - jump(a)) },
       { lesson: 'still' as const, card: pick((c) => c.kind === 'residual' && c.gold === 'artifact', (a, b) => Number(b.id === CLEAN_STILL_CARD) - Number(a.id === CLEAN_STILL_CARD) || snr(b) - snr(a)) },
@@ -427,11 +440,17 @@ export class Deck extends StorePart {
     return { ms: Math.max(0, Math.min(meta.thinkMs, gap)), heldMs, answeredAt }
   }
 
-  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: VoteTiming & { hints?: boolean | null } = {}) {
+  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, single: VotePosition | null = null, meta: VoteTiming & { hints?: boolean | null; marks?: (StoredMark | null)[] } = {}) {
     const card = this.kit.deckById.get(cardId)
     const sky = card ? undefined : this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
-    if (position && (choice !== 'moves' || position.frame >= (card ? card.n_frames : skyVisits((sky as SkyCard).frames).length))) throw new HttpError(400, 'invalid_position')
+    const frameTimes = card ? card.frames.map((f) => f.mjd * 24) : skyVisits((sky as SkyCard).frames).map((v) => v.mjd * 24)
+    const marks = meta.marks ?? null
+    if (marks && (choice !== 'moves' || marks.length !== frameTimes.length || marks.filter(Boolean).length < 2)) throw new HttpError(400, 'invalid_position')
+    if (single && (choice !== 'moves' || single.frame >= frameTimes.length)) throw new HttpError(400, 'invalid_position')
+    const firstMark = marks ? marks.findIndex(Boolean) : -1
+    const position: VotePosition | null = marks ? { frame: firstMark, x: (marks[firstMark] as StoredMark).ax, y: (marks[firstMark] as StoredMark).ay } : single
+    const trackOk = marks ? steadyTrack(marks, frameTimes) : null
     const label = CHOICE_LABEL[choice]
     const { xp, counted, guided, first, newBadges } = this.db.transaction(() => {
       if (this.q('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
@@ -442,7 +461,7 @@ export class Deck extends StorePart {
       const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : exposed ? { xp: 0, streakBonus: 0, streak: 0, reason: 'exposed' } : this.xp.award(userId, 'vote', cardId, { ms })
       const counted = !guided && !exposed && xp.reason !== 'too_fast'
       const none = !this.q("SELECT 1 FROM votes WHERE card_id = ? AND counted = 1 AND label = 'real'").get(cardId)
-      this.q('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via, practice, answered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      this.q('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via, practice, answered_at, positions, track_ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
         userId,
         cardId,
         label,
@@ -457,6 +476,8 @@ export class Deck extends StorePart {
         shared ? 'share' : null,
         guided ? 1 : 0,
         answeredAt,
+        marks ? JSON.stringify(marks) : null,
+        trackOk === null ? null : trackOk ? 1 : 0,
       )
       this.q('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
       const newBadges: BadgeKey[] = []

@@ -101,6 +101,7 @@ export interface DeckCard {
   size_px: number
   size_arcmin: number
   marks: { u: number; v: number }[] | null
+  wcs?: Record<string, unknown> | null
 }
 
 export interface Manifest {
@@ -111,6 +112,7 @@ export interface Manifest {
   posts: number
   images_indexed: number
   deck_cards?: number
+  deck_min_frames?: number
   notes: string[]
 }
 

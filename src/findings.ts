@@ -40,12 +40,20 @@ export interface FindingCard {
   sprite: string | null
   offsets_s: number[]
   known: string | null
+  size_px: number
+  wcs: Record<string, unknown> | null
 }
+
+export type CrowdMark = { user: string; frame: number; x: number; y: number }
+
+const TRACK_STATES: FindingState[] = ['candidate', 'known', 'package_ready', 'in_review', 'published']
+export const MIN_TRACK_PEOPLE = 5
 
 export interface FindingDeps {
   status: (cardId: string) => string | undefined
   card: (cardId: string) => FindingCard | null
   positions: (cardId: string) => { mjd: number; ra: number; dec: number }[]
+  marks: (cardId: string) => CrowdMark[]
   dataVersion: string
 }
 
@@ -467,6 +475,25 @@ export class Findings {
       credits: credits.names,
       credits_anonymous: credits.anonymous,
       data_version: events[events.length - 1]?.data_version ?? this.deps.dataVersion,
+      tracks: this.tracks(f, card, userId),
+    }
+  }
+
+  private tracks(f: FindingRow, card: FindingCard, userId: string | null) {
+    if (f.example || !TRACK_STATES.includes(f.state)) return null
+    const marks = this.deps.marks(card.id)
+    const people = new Set(marks.map((m) => m.user))
+    if (people.size < MIN_TRACK_PEOPLE) return null
+    return {
+      people: people.size,
+      you: !!userId && people.has(userId),
+      size_px: card.size_px,
+      wcs: card.wcs,
+      frames: card.mjds.map((mjd, frame) => {
+        const here = marks.filter((m) => m.frame === frame)
+        const mine = userId ? here.find((m) => m.user === userId) : undefined
+        return { mjd, points: here.map((m) => ({ u: m.x, v: m.y })), mine: mine ? { u: mine.x, v: mine.y } : null }
+      }),
     }
   }
 

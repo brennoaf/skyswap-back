@@ -2,6 +2,7 @@ import { Type, type FastifyPluginAsyncTypebox } from '@fastify/type-provider-typ
 import { requireUser, writeLimit } from '../app.js'
 import { EXPLORE_ORDER, mjdIso, skyVisits } from '../explore.js'
 import type { DeckCard } from '../kit.js'
+import { snapMarks } from '../marks.js'
 import * as S from '../schemas.js'
 import { isSafeCutoutKey, type RouteCtx } from './content.js'
 
@@ -56,7 +57,10 @@ export const classifyRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, {
   app.post('/api/classify/votes', { schema: { tags: ['classify'], body: S.VoteBody, response: { 200: S.VoteResponse, 400: S.ErrorBody, 401: S.ErrorBody, 404: S.ErrorBody, 409: S.ErrorBody } }, config: writeLimit }, async (req, reply) => {
     const user = requireUser(req, reply)
     if (!user) return reply
-    const r = store.vote(user.id, req.body.card_id, req.body.choice, req.body.glitch ?? null, req.body.position ?? null, { heldMs: req.body.held_ms ?? 0, thinkMs: req.body.think_ms, answeredAt: req.body.answered_at, hints: req.body.hints ?? null })
+    const positions = req.body.positions
+    if (positions && !positions.every((p, i) => !p || p.frame === i)) return reply.status(400).send({ error: 'invalid_position' })
+    const marks = positions ? await snapMarks(kit.dataDir, kit.deckById.get(req.body.card_id) ?? null, positions) : undefined
+    const r = store.vote(user.id, req.body.card_id, req.body.choice, req.body.glitch ?? null, req.body.position ?? null, { heldMs: req.body.held_ms ?? 0, thinkMs: req.body.think_ms, answeredAt: req.body.answered_at, hints: req.body.hints ?? null, marks })
     return { counted: r.counted, guided: r.guided, xp: r.xp, reveal: r.reveal, new_badges: r.newBadges, first: r.first }
   })
 

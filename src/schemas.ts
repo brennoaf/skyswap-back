@@ -241,6 +241,9 @@ export const VoteBody = Type.Object({
   glitch: Type.Optional(Nullable(Type.Boolean())),
   position: Type.Optional(Type.Object({ frame: Type.Integer({ minimum: 0, maximum: 64 }), x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }) }, { additionalProperties: false })),
   held_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000 })),
+  positions: Type.Optional(
+    Type.Array(Nullable(Type.Object({ frame: Type.Integer({ minimum: 0, maximum: 64 }), x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }), ax: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), ay: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })) }, { additionalProperties: false })), { maxItems: 64 }),
+  ),
   think_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000 })),
   answered_at: Type.Optional(Type.Integer({ minimum: 0 })),
   hints: Type.Optional(Type.Boolean()),
@@ -478,6 +481,15 @@ export const FindingDetail = Type.Object(
       credits: Type.Array(Type.String()),
       credits_anonymous: Type.Integer(),
       data_version: Type.String(),
+      tracks: Nullable(
+        Type.Object({
+          people: Type.Integer(),
+          you: Type.Boolean(),
+          size_px: Type.Integer(),
+          wcs: Nullable(Type.Record(Type.String(), Type.Unknown())),
+          frames: Type.Array(Type.Object({ mjd: Type.Number(), points: Type.Array(Type.Object({ u: Type.Number(), v: Type.Number() })), mine: Nullable(Type.Object({ u: Type.Number(), v: Type.Number() })) })),
+        }),
+      ),
   },
   { $id: 'FindingDetail' },
 )

@@ -154,12 +154,13 @@ export class Store {
     const sky = this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
     const reveal = card ? this.reveal(card, null, choice) : this.skyReveal(sky as SkyCard, choice)
-    return { label: vote.label, reveal: { ...reveal, control: null, marks: [] }, note: vote.note, note_editable: vote.label === 'real' && !this.findings.stateOf(cardId) }
+    return { label: vote.label, reveal: { ...reveal, control: null, marks: [] }, note: vote.note, note_editable: vote.label === 'real' && this.isFirstYes(userId, cardId) && !this.findings.stateOf(cardId) }
   }
 
   setNote(userId: string, cardId: string, raw: string | null): string | null {
     const vote = this.db.prepare('SELECT label FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { label: string } | undefined
     if (!vote || vote.label !== 'real') throw new HttpError(404, 'not_answered')
+    if (!this.isFirstYes(userId, cardId)) throw new HttpError(403, 'not_first')
     if (this.findings.stateOf(cardId)) throw new HttpError(409, 'note_locked')
     const note = cleanNote(raw)
     if (note === 'invalid') throw new HttpError(400, 'invalid_note')
@@ -424,14 +425,12 @@ export class Store {
     return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
   }
 
-  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: { heldMs?: number; hints?: boolean | null; note?: string | null } = {}) {
+  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: { heldMs?: number; hints?: boolean | null } = {}) {
     const card = this.kit.deckById.get(cardId)
     const sky = card ? undefined : this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
     if (position && (choice !== 'moves' || position.frame >= (card ? card.n_frames : skyVisits((sky as SkyCard).frames).length))) throw new HttpError(400, 'invalid_position')
     if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
-    const note = choice === 'moves' ? cleanNote(meta.note) : null
-    if (note === 'invalid') throw new HttpError(400, 'invalid_note')
     const label = CHOICE_LABEL[choice]
     const elapsed = this.elapsedSinceIssue(userId, cardId)
     const heldMs = Math.min(elapsed, Math.max(0, meta.heldMs ?? 0))
@@ -441,9 +440,13 @@ export class Store {
     const exposed = this.findings.isExposed(userId, cardId)
     const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : exposed ? { xp: 0, streakBonus: 0, streak: 0, reason: 'exposed' } : this.award(userId, 'vote', cardId, { ms })
     const counted = !guided && !exposed && xp.reason !== 'too_fast'
-    this.db
-      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0, heldMs, shared ? 'share' : null, note)
+    const first = this.db.transaction(() => {
+      const none = !this.db.prepare("SELECT 1 FROM votes WHERE card_id = ? AND counted = 1 AND label = 'real'").get(cardId)
+      this.db
+        .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0, heldMs, shared ? 'share' : null)
+      return counted && label === 'real' && none
+    })()
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     const gold = card?.gold ?? null
     let outcome = { gold, correct: null as boolean | null, bits: 0 }
@@ -455,7 +458,12 @@ export class Store {
     const newBadges: BadgeKey[] = []
     if (counted && this.grantBadge(userId, 'first_vote')) newBadges.push('first_vote')
     const reveal = card ? this.reveal(card, outcome.correct, choice) : this.skyReveal(sky as SkyCard, choice)
-    return { xp, counted, guided, reveal, newBadges }
+    return { xp, counted, guided, reveal, newBadges, first }
+  }
+
+  private isFirstYes(userId: string, cardId: string): boolean {
+    const row = this.db.prepare("SELECT user_id FROM votes WHERE card_id = ? AND counted = 1 AND label = 'real' ORDER BY id LIMIT 1").get(cardId) as { user_id: string } | undefined
+    return row?.user_id === userId
   }
 
   skyStatus(id: string): string {

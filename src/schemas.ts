@@ -229,7 +229,6 @@ export const VoteBody = Type.Object({
   position: Type.Optional(Type.Object({ frame: Type.Integer({ minimum: 0, maximum: 64 }), x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }) }, { additionalProperties: false })),
   held_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000 })),
   hints: Type.Optional(Type.Boolean()),
-  note: Type.Optional(Type.String({ maxLength: 600 })),
 })
 
 export const SharedCardResponse = Type.Object({ card: DeckCardPublic, answered: Nullable(Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('glitch'), Type.Literal('unsure')])) }, { $id: 'SharedCardResponse' })
@@ -264,7 +263,7 @@ export const Reveal = Type.Object(
   { $id: 'Reveal' },
 )
 
-export const VoteResponse = Type.Object({ counted: Type.Boolean(), guided: Type.Boolean(), xp: XpDto, reveal: Reveal, new_badges: Type.Array(Type.String()) }, { $id: 'VoteResponse' })
+export const VoteResponse = Type.Object({ counted: Type.Boolean(), guided: Type.Boolean(), xp: XpDto, reveal: Reveal, new_badges: Type.Array(Type.String()), first: Type.Boolean() }, { $id: 'VoteResponse' })
 
 export const TagBody = Type.Object({ tag: Type.Union([Type.Literal('asteroid'), Type.Literal('artifact'), Type.Literal('brightness'), Type.Literal('unsure')]), on: Type.Boolean() })
 

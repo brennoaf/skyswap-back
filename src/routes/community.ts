@@ -106,7 +106,7 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
 
   app.put(
     '/api/me/cards/:id/note',
-    { config: writeLimit, schema: { tags: ['me'], params: Type.Object({ id: Type.String({ maxLength: 120 }) }), body: S.NoteBody, response: { 200: S.NoteBody, 400: S.ErrorBody, 401: S.ErrorBody, 404: S.ErrorBody, 409: S.ErrorBody } } },
+    { config: writeLimit, schema: { tags: ['me'], params: Type.Object({ id: Type.String({ maxLength: 120 }) }), body: S.NoteBody, response: { 200: S.NoteBody, 400: S.ErrorBody, 401: S.ErrorBody, 403: S.ErrorBody, 404: S.ErrorBody, 409: S.ErrorBody } } },
     async (req, reply) => {
       const user = requireUser(req, reply)
       if (!user) return reply

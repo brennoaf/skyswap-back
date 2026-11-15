@@ -4,6 +4,7 @@ import { Avatars, type AvatarDto } from './avatars.js'
 import type { DB } from './db.js'
 import { EXPLORE_ORDER, mjdIso, QUIET_STREAK, skyCardId, skyVisits, WARMUP_CARDS, WARMUP_KNOWN_SHARE, type SkyCard, type SkyFrame } from './explore.js'
 import { ang2pixNest } from './healpix.js'
+import { cleanNote } from './notes.js'
 import type { DeckCard, Kit, ObjectSummary, Post } from './kit.js'
 import { applyVote, goldRate, SwapCard, SwapUser, type Label } from './swap.js'
 import {
@@ -146,14 +147,24 @@ export class Store {
   }
 
   myCard(userId: string, cardId: string) {
-    const vote = this.db.prepare('SELECT label FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { label: string } | undefined
+    const vote = this.db.prepare('SELECT label, note FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { label: string; note: string | null } | undefined
     if (!vote) throw new HttpError(404, 'not_answered')
     const choice: Choice = vote.label === 'real' ? 'moves' : vote.label === 'artifact' ? 'still' : 'unsure'
     const card = this.kit.deckById.get(cardId)
     const sky = this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
     const reveal = card ? this.reveal(card, null, choice) : this.skyReveal(sky as SkyCard, choice)
-    return { label: vote.label, reveal: { ...reveal, control: null, marks: [] } }
+    return { label: vote.label, reveal: { ...reveal, control: null, marks: [] }, note: vote.note, note_editable: vote.label === 'real' && !this.findings.stateOf(cardId) }
+  }
+
+  setNote(userId: string, cardId: string, raw: string | null): string | null {
+    const vote = this.db.prepare('SELECT label FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId) as { label: string } | undefined
+    if (!vote || vote.label !== 'real') throw new HttpError(404, 'not_answered')
+    if (this.findings.stateOf(cardId)) throw new HttpError(409, 'note_locked')
+    const note = cleanNote(raw)
+    if (note === 'invalid') throw new HttpError(400, 'invalid_note')
+    this.db.prepare('UPDATE votes SET note = ? WHERE user_id = ? AND card_id = ?').run(note, userId, cardId)
+    return note
   }
 
   private loadSkyCards(): void {
@@ -413,12 +424,14 @@ export class Store {
     return Math.max(0, this.now() - Math.max(issue.issued_at, last.t ?? -Infinity))
   }
 
-  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: { heldMs?: number; hints?: boolean | null } = {}) {
+  vote(userId: string, cardId: string, choice: Choice, glitch: boolean | null = null, position: VotePosition | null = null, meta: { heldMs?: number; hints?: boolean | null; note?: string | null } = {}) {
     const card = this.kit.deckById.get(cardId)
     const sky = card ? undefined : this.skyCards.get(cardId)
     if (!card && !sky) throw new HttpError(404, 'unknown_card')
     if (position && (choice !== 'moves' || position.frame >= (card ? card.n_frames : skyVisits((sky as SkyCard).frames).length))) throw new HttpError(400, 'invalid_position')
     if (this.db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND card_id = ?').get(userId, cardId)) throw new HttpError(409, 'already_voted')
+    const note = choice === 'moves' ? cleanNote(meta.note) : null
+    if (note === 'invalid') throw new HttpError(400, 'invalid_note')
     const label = CHOICE_LABEL[choice]
     const elapsed = this.elapsedSinceIssue(userId, cardId)
     const heldMs = Math.min(elapsed, Math.max(0, meta.heldMs ?? 0))
@@ -429,8 +442,8 @@ export class Store {
     const xp: XpResult = guided ? { xp: 0, streakBonus: 0, streak: 0, reason: 'guided' } : exposed ? { xp: 0, streakBonus: 0, streak: 0, reason: 'exposed' } : this.award(userId, 'vote', cardId, { ms })
     const counted = !guided && !exposed && xp.reason !== 'too_fast'
     this.db
-      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0, heldMs, shared ? 'share' : null)
+      .prepare('INSERT INTO votes (user_id, card_id, label, ms, counted, created_at, glitch, cell, position, hints, held_ms, via, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, cardId, label, ms, counted ? 1 : 0, this.now(), glitch === null ? null : glitch ? 1 : 0, this.cellOf(cardId), position ? JSON.stringify(position) : null, meta.hints === undefined || meta.hints === null ? null : meta.hints ? 1 : 0, heldMs, shared ? 'share' : null, note)
     this.db.prepare('DELETE FROM card_issues WHERE user_id = ? AND card_id = ?').run(userId, cardId)
     const gold = card?.gold ?? null
     let outcome = { gold, correct: null as boolean | null, bits: 0 }
@@ -708,7 +721,7 @@ export class Store {
 
   alerts(userId: string) {
     const read = new Set((this.db.prepare('SELECT alert_id FROM alerts_read WHERE user_id = ?').all(userId) as { alert_id: string }[]).map((r) => r.alert_id))
-    const out: { id: string; type: 'new_data' | 'consensus' | 'finding' | 'finding_followed' | 'badge' | 'level' | 'goal'; ref: string; detail: string; created_at: number; read: boolean }[] = []
+    const out: { id: string; type: 'new_data' | 'consensus' | 'finding' | 'finding_followed' | 'note' | 'badge' | 'level' | 'goal'; ref: string; detail: string; created_at: number; read: boolean }[] = []
     const follows = this.db.prepare('SELECT object_id, created_at FROM follows WHERE user_id = ?').all(userId) as { object_id: string; created_at: number }[]
     for (const f of follows) {
       const o = this.objectsById.get(f.object_id)
@@ -720,6 +733,7 @@ export class Store {
       if (s && !s.gold && s.status !== 'open' && s.status !== 'real') out.push({ id: `consensus:${v.card_id}:${s.status}`, type: 'consensus', ref: v.card_id, detail: s.status, created_at: v.created_at, read: false })
     }
     for (const e of this.findings.eventsForAlerts(userId)) out.push({ id: e.id, type: e.followed ? 'finding_followed' : 'finding', ref: e.card_id, detail: e.state, created_at: e.created_at, read: false })
+    for (const n of this.findings.noteAlerts(userId)) out.push({ id: `note:${n.card_id}`, type: 'note', ref: n.card_id, detail: 'note', created_at: n.created_at, read: false })
     const badges = this.db.prepare('SELECT badge, created_at FROM badges WHERE user_id = ?').all(userId) as { badge: string; created_at: number }[]
     for (const b of badges) out.push({ id: `badge:${b.badge}`, type: 'badge', ref: b.badge, detail: b.badge, created_at: b.created_at, read: false })
     const level = levelFor(this.totalXp(userId)).current

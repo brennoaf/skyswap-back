@@ -19,6 +19,8 @@ const POPULAR_DISCOUNT = 0.3
 const POPULAR_DISCOUNTED: FindingState[] = ['likely_artifact', 'known']
 
 export const EXAMPLE_PREFIX = 'example:'
+const NOTE_STATES: FindingState[] = ['candidate', 'known', 'package_ready', 'in_review', 'published']
+const NOTE_HIDE_AT = 3
 export const DOUBT_REASONS = ['image_defect', 'known_asteroid', 'variable_star', 'other'] as const
 export type DoubtReason = (typeof DOUBT_REASONS)[number]
 export type ReactionKind = 'interesting' | 'doubt'
@@ -218,9 +220,36 @@ export class Findings {
     return { names: visible.map((r) => r.nickname), anonymous: rows.length - visible.length }
   }
 
-  private firstVote(f: FindingRow): { nickname: string | null; at: number } | null {
-    const r = this.db.prepare("SELECT u.nickname, u.credit_visible, v.created_at FROM votes v JOIN users u ON u.id = v.user_id WHERE v.card_id = ? AND v.counted = 1 AND v.label = 'real' ORDER BY v.id LIMIT 1").get(f.card_id) as { nickname: string; credit_visible: number; created_at: number } | undefined
-    return r ? { nickname: r.credit_visible ? r.nickname : null, at: r.created_at } : null
+  private firstRow(f: FindingRow) {
+    return this.db.prepare("SELECT u.id AS user_id, u.nickname, u.credit_visible, v.created_at, v.note FROM votes v JOIN users u ON u.id = v.user_id WHERE v.card_id = ? AND v.counted = 1 AND v.label = 'real' ORDER BY v.id LIMIT 1").get(f.card_id) as
+      | { user_id: string; nickname: string; credit_visible: number; created_at: number; note: string | null }
+      | undefined
+  }
+
+  private noteShown(f: FindingRow, r: { credit_visible: number; note: string | null }): boolean {
+    if (!r.note || !r.credit_visible || f.example || !NOTE_STATES.includes(f.state)) return false
+    return this.count('SELECT COUNT(*) AS n FROM note_reports WHERE card_id = ?', f.card_id) < NOTE_HIDE_AT
+  }
+
+  private firstVote(f: FindingRow): { nickname: string | null; at: number; note: string | null } | null {
+    const r = this.firstRow(f)
+    return r ? { nickname: r.credit_visible ? r.nickname : null, at: r.created_at, note: this.noteShown(f, r) ? r.note : null } : null
+  }
+
+  reportNote(userId: string, cardId: string): boolean {
+    const f = this.row(cardId)
+    const r = f ? this.firstRow(f) : undefined
+    if (!f || !r || !this.noteShown(f, r)) return false
+    this.db.prepare('INSERT OR IGNORE INTO note_reports (user_id, card_id, created_at) VALUES (?, ?, ?)').run(userId, cardId, this.now())
+    return true
+  }
+
+  noteAlerts(userId: string): { card_id: string; created_at: number }[] {
+    const rows = this.db.prepare("SELECT f.* FROM findings f WHERE f.example = 0 AND f.card_id IN (SELECT card_id FROM votes WHERE user_id = ? AND counted = 1 AND label = 'real' AND note IS NOT NULL)").all(userId) as FindingRow[]
+    return rows.flatMap((f) => {
+      const r = this.firstRow(f)
+      return r && r.user_id === userId && this.noteShown(f, r) ? [{ card_id: f.card_id, created_at: f.created_at }] : []
+    })
   }
 
   private checkRows(cardId: string): CheckRow[] {
@@ -358,6 +387,7 @@ export class Findings {
       checks_total: CHECK_SERVICES.length,
       credit_names: credits.names.slice(0, 2),
       credit_others: Math.max(0, credits.names.length - 2) + credits.anonymous,
+      first_vote: this.firstVote(f),
       social: this.social(f.card_id, userId),
     }
   }
@@ -397,7 +427,6 @@ export class Findings {
       events,
       credits: credits.names,
       credits_anonymous: credits.anonymous,
-      first_vote: this.firstVote(f),
       data_version: events[events.length - 1]?.data_version ?? this.deps.dataVersion,
     }
   }

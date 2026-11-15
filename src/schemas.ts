@@ -229,6 +229,7 @@ export const VoteBody = Type.Object({
   position: Type.Optional(Type.Object({ frame: Type.Integer({ minimum: 0, maximum: 64 }), x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }) }, { additionalProperties: false })),
   held_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000 })),
   hints: Type.Optional(Type.Boolean()),
+  note: Type.Optional(Type.String({ maxLength: 600 })),
 })
 
 export const SharedCardResponse = Type.Object({ card: DeckCardPublic, answered: Nullable(Type.Union([Type.Literal('moves'), Type.Literal('still'), Type.Literal('glitch'), Type.Literal('unsure')])) }, { $id: 'SharedCardResponse' })
@@ -444,6 +445,7 @@ export const FindingSummary = Type.Object(
     checks_total: Type.Integer(),
     credit_names: Type.Array(Type.String()),
     credit_others: Type.Integer(),
+    first_vote: Nullable(Type.Object({ nickname: Nullable(Type.String()), at: Type.Number(), note: Nullable(Type.String()) })),
     social: FindingSocial,
   },
   { $id: 'FindingSummary' },
@@ -460,7 +462,6 @@ export const FindingDetail = Type.Object(
       events: Type.Array(Type.Object({ state: Type.String(), reason: Nullable(Type.String()), source: Type.String(), url: Nullable(Type.String()), data_version: Type.String(), created_at: Type.Number() })),
       credits: Type.Array(Type.String()),
       credits_anonymous: Type.Integer(),
-      first_vote: Nullable(Type.Object({ nickname: Nullable(Type.String()), at: Type.Number() })),
       data_version: Type.String(),
   },
   { $id: 'FindingDetail' },
@@ -504,6 +505,8 @@ export const MyCards = Type.Object(
   { $id: 'MyCards' },
 )
 
-export const MyCardDetail = Type.Object({ label: Type.String(), reveal: Reveal })
+export const MyCardDetail = Type.Object({ label: Type.String(), reveal: Reveal, note: Nullable(Type.String()), note_editable: Type.Boolean() })
+
+export const NoteBody = Type.Object({ note: Nullable(Type.String({ maxLength: 600 })) })
 
 export const CreditResponse = Type.Object({ visible: Type.Boolean() }, { $id: 'CreditResponse' })

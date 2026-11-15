@@ -203,6 +203,13 @@ export const MIGRATIONS: string[] = [
    ALTER TABLE sky_cards ADD COLUMN thumb TEXT;`,
   `ALTER TABLE card_issues ADD COLUMN shared INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE votes ADD COLUMN via TEXT;`,
+  `ALTER TABLE votes ADD COLUMN note TEXT;
+   CREATE TABLE note_reports (
+     user_id TEXT NOT NULL,
+     card_id TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, card_id)
+   );`,
 ]
 
 export function openDb(path: string): DB {

@@ -104,6 +104,27 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
     },
   )
 
+  app.put(
+    '/api/me/cards/:id/note',
+    { config: writeLimit, schema: { tags: ['me'], params: Type.Object({ id: Type.String({ maxLength: 120 }) }), body: S.NoteBody, response: { 200: S.NoteBody, 400: S.ErrorBody, 401: S.ErrorBody, 404: S.ErrorBody, 409: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      return { note: store.setNote(user.id, req.params.id, req.body.note) }
+    },
+  )
+
+  app.post(
+    '/api/community/findings/:id/note-report',
+    { config: writeLimit, schema: { tags: ['community'], params: FindingParams, response: { 200: Type.Object({ ok: Type.Boolean() }), 401: S.ErrorBody, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      if (!store.findings.reportNote(user.id, req.params.id)) return reply.status(404).send({ error: 'no_note' })
+      return { ok: true }
+    },
+  )
+
   app.get('/api/me/credit', { schema: { tags: ['me'], response: { 200: S.CreditResponse, 401: S.ErrorBody } } }, async (req, reply) => {
     const user = requireUser(req, reply)
     if (!user) return reply

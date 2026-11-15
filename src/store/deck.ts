@@ -74,6 +74,10 @@ export class Deck extends StorePart {
         return sky ? skySpot(sky) : null
       },
       objectFor: (name) => this.objectIdFor(name),
+      objectRef: (id) => {
+        const o = this.kit.objects.find((x) => x.id === id)
+        return o ? { id: o.id, name: o.name, avatar: objectCard(o).avatar } : null
+      },
       hasThumb: (id) => this.skyCards.has(id) && !!this.skyThumb(id),
       appPosts: () => (this.kit.appAccount?.posts ?? []).map((p) => ({ id: p.id, at: Date.parse(p.created_at) })),
       appItem: (id, userId) => this.appItem(id, userId),

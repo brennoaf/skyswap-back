@@ -529,6 +529,7 @@ export const FindingSummary = Type.Object(
     photo_cols: Type.Integer(),
     mark: Nullable(Type.Object({ x: Type.Number(), y: Type.Number() })),
     object_id: Nullable(Type.String()),
+    object: Nullable(Type.Object({ id: Type.String(), name: Type.String(), avatar: Type.String() })),
   },
   { $id: 'FindingSummary' },
 )

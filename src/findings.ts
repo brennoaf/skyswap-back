@@ -62,6 +62,7 @@ export interface FindingDeps {
   marks: (cardId: string) => CrowdMark[]
   spot: (cardId: string) => SkySpot | null
   objectFor: (name: string) => string | null
+  objectRef: (id: string) => { id: string; name: string; avatar: string } | null
   hasThumb: (cardId: string) => boolean
   appPosts: () => { id: string; at: number }[]
   appItem: (id: string, userId: string | null) => AppFeedItem | null
@@ -485,6 +486,7 @@ export class Findings {
     const checks = this.checkRows(f.card_id)
     const credits = this.credits(f)
     const times = card.mjds.map((m) => new Date((m - 40587) * 86_400_000).toISOString())
+    const objectId = f.state === 'known' && f.reason ? this.deps.objectFor(f.reason) : null
     return {
       id: f.card_id,
       kind: card.kind,
@@ -511,7 +513,8 @@ export class Findings {
       photo: card.sprite ?? (this.deps.hasThumb(card.id) ? `/api/community/findings/${encodeURIComponent(card.id)}/photo` : null),
       photo_cols: card.sprite ? card.mjds.length : 1,
       mark: this.firstMark(card.id),
-      object_id: f.state === 'known' && f.reason ? this.deps.objectFor(f.reason) : null,
+      object_id: objectId,
+      object: objectId ? this.deps.objectRef(objectId) : null,
     }
   }
 

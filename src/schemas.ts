@@ -229,7 +229,7 @@ export const SkyCardBody = Type.Object({
 
 export const SkyCardResponse = Type.Object({ id: Type.String(), ra: Type.Number(), dec: Type.Number(), cell: Type.Integer(), offsets_s: Type.Array(Type.Number()) }, { $id: 'SkyCardResponse' })
 
-export const ExploreCellsResponse = Type.Object({ order: Type.Integer(), cells: Type.Array(Type.Integer()), bytes: Type.Array(Type.Integer()) }, { $id: 'ExploreCellsResponse' })
+export const ExploreCellsResponse = Type.Object({ order: Type.Integer(), cells: Type.Array(Type.Integer()), bytes: Type.Array(Type.Integer()), photo_bytes: Type.Array(Type.Integer()) }, { $id: 'ExploreCellsResponse' })
 
 export const ExploreMapResponse = Type.Object(
   {
@@ -453,7 +453,7 @@ export const SkyResponse = Type.Object(
     source: Type.Union([Type.Literal('fragment'), Type.Literal('sia'), Type.Literal('none')]),
     incomplete: Type.Boolean({ description: 'True when the archive could not be asked (offline) or did not answer for every collection: an empty or short list is then not proof that no image exists.' }),
     cell: Nullable(Type.Integer()),
-    tile_bytes: Nullable(Type.Integer()),
+    point_bytes: Nullable(Type.Integer()),
     total: Type.Integer(),
     releases: Type.Array(Type.String()),
     bands: Type.Record(Type.String(), Type.Integer()),

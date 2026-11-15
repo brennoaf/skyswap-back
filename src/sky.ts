@@ -18,6 +18,7 @@ export interface SkyImage {
 export interface SkyResult {
   source: 'fragment' | 'sia' | 'none'
   cell: number | null
+  homes: number[]
   images: SkyImage[]
   incomplete: boolean
 }
@@ -45,7 +46,7 @@ export function mjdToIso(mjd: number): string {
   return new Date((mjd - 40587) * 86400000).toISOString()
 }
 
-export async function imagesFromFragment(indexDir: string, wave: unknown, ra: number, dec: number, ask?: (q: PointQuery) => Promise<PointAnswer>): Promise<{ cell: number; images: SkyImage[] }> {
+export async function imagesFromFragment(indexDir: string, wave: unknown, ra: number, dec: number, ask?: (q: PointQuery) => Promise<PointAnswer>): Promise<{ cell: number; homes: number[]; images: SkyImage[] }> {
   const query = { indexDir, ra, dec, pick: IMAGE_FIELDS }
   const q = ask ? await ask(query) : await answerPoint(query, wave)
   const images = (q.rows as unknown as TileHit[])
@@ -62,7 +63,7 @@ export async function imagesFromFragment(indexDir: string, wave: unknown, ra: nu
       obs_id: h.obsid ?? null,
       file_size: typeof h.file_size === 'number' && Number.isFinite(h.file_size) && h.file_size > 0 ? h.file_size : null,
     }))
-  return { cell: q.cell, images }
+  return { cell: q.cell, homes: q.homes, images }
 }
 
 export function parseVotable(xml: string): Record<string, string>[] {
@@ -169,8 +170,8 @@ export const siaCache = new LruCache<string, { images: SkyImage[]; expires: numb
 
 export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec: number, opts: { online: boolean; fetchImpl?: typeof fetch; afterMjd?: number | null; now?: () => number; ask?: (q: PointQuery) => Promise<PointAnswer> }): Promise<SkyResult> {
   const frag = await imagesFromFragment(indexDir, wave, ra, dec, opts.ask)
-  if (frag.images.length) return { source: 'fragment', cell: frag.cell, images: frag.images, incomplete: false }
-  if (!opts.online) return { source: 'none', cell: frag.cell, images: [], incomplete: true }
+  if (frag.images.length) return { source: 'fragment', cell: frag.cell, homes: frag.homes, images: frag.images, incomplete: false }
+  if (!opts.online) return { source: 'none', cell: frag.cell, homes: frag.homes, images: [], incomplete: true }
   const now = (opts.now ?? Date.now)()
   const key = `${ra.toFixed(4)},${dec.toFixed(4)}`
   const kept = siaCache.get(key)
@@ -184,5 +185,5 @@ export async function imagesAt(indexDir: string, wave: unknown, ra: number, dec:
   }
   const after = opts.afterMjd
   const fresh = after == null ? images : images.filter((i) => i.mjd > after)
-  return { source: fresh.length ? 'sia' : 'none', cell: frag.cell, images: fresh, incomplete }
+  return { source: fresh.length ? 'sia' : 'none', cell: frag.cell, homes: frag.homes, images: fresh, incomplete }
 }

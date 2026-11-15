@@ -272,7 +272,7 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       source: res.source,
       incomplete: res.incomplete,
       cell: res.cell,
-      tile_bytes: res.cell === null ? null : (kit.index.tile_bytes.get(res.cell) ?? null),
+      point_bytes: res.cell === null ? null : res.homes.reduce((a, h) => a + (kit.index.photo_bytes.get(h) ?? 0), kit.index.cell_bytes.get(res.cell) ?? 0),
       total: images.length,
       releases: [...new Set(images.map((i) => i.release))].sort(),
       bands,

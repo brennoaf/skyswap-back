@@ -99,7 +99,10 @@ export async function buildApp(deps: AppDeps) {
   const staticOpts = { decorateReply: false, maxAge: 86400 * 1000, immutable: false }
   await app.register(fastifyStatic, { root: join(kit.dataDir, 'objects'), prefix: '/kit/objects/', ...staticOpts })
   if (existsSync(join(kit.dataDir, 'deck', 'media'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'deck', 'media'), prefix: '/kit/deck/', ...staticOpts })
-  if (existsSync(join(kit.dataDir, 'index', 'tiles'))) await app.register(fastifyStatic, { root: join(kit.dataDir, 'index', 'tiles'), prefix: '/kit/index/tiles/', decorateReply: false, maxAge: 0, etag: true, lastModified: true })
+  for (const part of ['cells', 'photos']) {
+    const root = join(kit.dataDir, 'index', part)
+    if (existsSync(root)) await app.register(fastifyStatic, { root, prefix: `/kit/index/${part}/`, decorateReply: false, maxAge: 0, etag: true, lastModified: true })
+  }
   app.get('/kit/index/wave.json', { schema: { hide: true } }, async (_req, reply) => reply.header('cache-control', 'public, max-age=86400').send(kit.wave))
   mkdirSync(config.avatarDir, { recursive: true })
   await app.register(fastifyStatic, { root: config.avatarDir, prefix: '/kit/avatars/', decorateReply: false, maxAge: 30 * 86400 * 1000, immutable: true })

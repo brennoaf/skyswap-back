@@ -136,7 +136,7 @@ export interface Kit {
   deckById: Map<string, DeckCard>
   wave: unknown
   indexCells: number[]
-  index: { images: number; tile_bytes: Map<number, number>; until_mjd: number | null; generated_at: string | null }
+  index: { images: number; cell_bytes: Map<number, number>; photo_bytes: Map<number, number>; until_mjd: number | null; generated_at: string | null }
 }
 
 export function orderPosts(posts: Post[]): Post[] {
@@ -170,10 +170,11 @@ export function loadKit(dataDir: string): Kit {
   const wavePath = join(dataDir, 'index', 'wave.json')
   const indexPath = join(dataDir, 'index', 'manifest.json')
   const indexManifest = existsSync(indexPath)
-    ? (JSON.parse(readFileSync(indexPath, 'utf8')) as { images?: number; generated_at?: string; tiles_index?: Record<string, { bytes?: number }> })
+    ? (JSON.parse(readFileSync(indexPath, 'utf8')) as { images?: number; generated_at?: string; cells_index?: Record<string, { bytes?: number }>; photos_index?: Record<string, { bytes?: number }> })
     : {}
-  const tileBytes = new Map(Object.entries(indexManifest.tiles_index ?? {}).map(([k, v]) => [Number(k), v.bytes ?? 0] as [number, number]))
-  const indexCells = [...tileBytes.keys()].filter(Number.isInteger).sort((a, b) => a - b)
+  const sizes = (m: Record<string, { bytes?: number }> = {}) => new Map(Object.entries(m).map(([k, v]) => [Number(k), v.bytes ?? 0] as [number, number]))
+  const cellBytes = sizes(indexManifest.cells_index)
+  const indexCells = [...cellBytes.keys()].filter(Number.isInteger).sort((a, b) => a - b)
   const cellsPath = join(dataDir, 'index', 'cells.json')
   const cellsMeta = existsSync(cellsPath) ? (JSON.parse(readFileSync(cellsPath, 'utf8')) as { columns: string[]; rows: number[][] }) : null
   const maxCol = cellsMeta ? cellsMeta.columns.indexOf('mjd_max') : -1
@@ -190,7 +191,7 @@ export function loadKit(dataDir: string): Kit {
     deckById: new Map(deck.map((c) => [c.id, c])),
     wave: existsSync(wavePath) ? JSON.parse(readFileSync(wavePath, 'utf8')) : [],
     indexCells,
-    index: { images: indexManifest.images ?? manifest.images_indexed, tile_bytes: tileBytes, until_mjd: untilMjd, generated_at: indexManifest.generated_at ?? null },
+    index: { images: indexManifest.images ?? manifest.images_indexed, cell_bytes: cellBytes, photo_bytes: sizes(indexManifest.photos_index), until_mjd: untilMjd, generated_at: indexManifest.generated_at ?? null },
   }
 }
 

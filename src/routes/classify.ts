@@ -45,7 +45,7 @@ export const classifyRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, {
 
   app.get('/api/explore/cells', { schema: { tags: ['explore'], response: { 200: S.ExploreCellsResponse } } }, async (_req, reply) => {
     reply.header('cache-control', 'no-cache')
-    return { order: EXPLORE_ORDER, cells: kit.indexCells, bytes: kit.indexCells.map((c) => kit.index.tile_bytes.get(c) ?? 0) }
+    return { order: EXPLORE_ORDER, cells: kit.indexCells, bytes: kit.indexCells.map((c) => kit.index.cell_bytes.get(c) ?? 0), photo_bytes: kit.indexCells.map((c) => kit.index.photo_bytes.get(c) ?? 0) }
   })
 
   app.get('/api/explore/map', { schema: { tags: ['explore'], response: { 200: S.ExploreMapResponse } } }, async (req) => store.exploreMap(req.user?.id ?? null))

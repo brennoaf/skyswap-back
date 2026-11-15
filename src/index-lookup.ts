@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parquetReadObjects } from 'hyparquet'
-import { ang2pixNest, insideQuad, wavelengthAt, world2pix } from './vendor/sky.js'
+import { homesOf, joinPhotos, nearRows, placeRows, readParquet } from './vendor/spherex.js'
+import { ang2pixNest } from './vendor/sky.js'
 
 export type IndexRow = Record<string, unknown> & {
   key: string
@@ -18,44 +18,38 @@ export type IndexRow = Record<string, unknown> & {
   lam?: number
 }
 
-export const TILE_ROWS_BUDGET = Number(process.env.SKYSWAP_INDEX_ROWS ?? 120_000)
+export const INDEX_ROWS_BUDGET = Number(process.env.SKYSWAP_INDEX_ROWS ?? 120_000)
 export const POINT_ROWS_BUDGET = 40_000
 export const VISIT_GAP_DAYS = 30 / 1440
 export const PER_VISIT = 4
 export const RUN_VISITS = 4
 export const RUN_DAYS = 8 / 24
 
-type Wave = Record<number, unknown>
 type ReadFn = (path: string) => Promise<Buffer>
+type Part = 'cells' | 'photos'
+type Filter = { band?: string | null; t1?: number | null; t2?: number | null }
 
-function plain(v: unknown): unknown {
-  if (typeof v === 'bigint') return Number(v)
-  if (ArrayBuffer.isView(v) && !(v instanceof DataView)) return Array.from(v as unknown as ArrayLike<number | bigint>, (x) => Number(x))
-  if (Array.isArray(v)) return v.map((x) => (typeof x === 'bigint' ? Number(x) : x))
-  return v
-}
-
-export class TileRowCache {
+export class IndexRowCache {
   private entries = new Map<string, Promise<IndexRow[] | null>>()
   private sizes = new Map<string, number>()
   private total = 0
   reads = 0
 
-  constructor(readonly budgetRows = TILE_ROWS_BUDGET, private readonly read: ReadFn = readFile) {}
+  constructor(readonly budgetRows = INDEX_ROWS_BUDGET, private readonly read: ReadFn = readFile) {}
 
   get rows(): number {
     return this.total
   }
 
-  load(indexDir: string, cell: number): Promise<IndexRow[] | null> {
-    const key = `${indexDir}|${cell}`
+  load(indexDir: string, part: Part, id: number): Promise<IndexRow[] | null> {
+    const key = `${indexDir}|${part}|${id}`
     const hit = this.entries.get(key)
     if (hit) {
       this.entries.delete(key)
       this.entries.set(key, hit)
       return hit
     }
-    const p = this.parse(join(indexDir, 'tiles', 'o5', `${cell}.parquet`)).then((rows) => {
+    const p = this.parse(join(indexDir, part, 'o5', `${id}.parquet`)).then((rows) => {
       if (this.entries.get(key) === p) {
         const n = rows?.length ?? 0
         this.sizes.set(key, n)
@@ -78,9 +72,7 @@ export class TileRowCache {
     }
     this.reads++
     const file = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
-    const rows = (await parquetReadObjects({ file, rowFormat: 'object' })) as Record<string, unknown>[]
-    for (const r of rows) for (const k in r) r[k] = plain(r[k])
-    return rows as IndexRow[]
+    return (await readParquet(file)) as IndexRow[]
   }
 
   private evict(keep: string): void {
@@ -96,20 +88,22 @@ export class TileRowCache {
   }
 }
 
-export const tileRows = new TileRowCache()
+export const indexRows = new IndexRowCache()
 
-export function pointRows(rows: IndexRow[], wave: unknown, ra: number, dec: number, f: { band?: string | null; t1?: number | null; t2?: number | null } = {}): IndexRow[] {
-  const grids = wave as Wave
-  const out: IndexRow[] = []
-  for (const r of rows) {
-    if (f.band && r.band !== f.band) continue
-    if (f.t1 != null && r.mjd < f.t1) continue
-    if (f.t2 != null && r.mjd > f.t2) continue
-    if (!insideQuad(ra, dec, r.c_ra, r.c_dec)) continue
-    const [x, y] = world2pix(r.wcs, r.sip, ra, dec) as [number, number]
-    out.push({ ...r, px: x, py: y, lam: wavelengthAt(grids[r.wave_id], x, y) as number })
-  }
-  return out.sort((a, b) => a.mjd - b.mjd)
+export async function cellRows(indexDir: string, wave: unknown, ra: number, dec: number, cache = indexRows): Promise<{ cell: number; homes: number[]; hits: IndexRow[] }> {
+  const cell = ang2pixNest(5, ra, dec) as number
+  const rows = await cache.load(indexDir, 'cells', cell)
+  if (!rows) return { cell, homes: [], hits: [] }
+  const near = nearRows(rows, ra, dec) as IndexRow[]
+  const homes = homesOf(near) as number[]
+  const photos = await Promise.all(
+    homes.map(async (h) => {
+      const p = await cache.load(indexDir, 'photos', h)
+      if (!p) throw new Error(`photos ${h} missing`)
+      return p
+    }),
+  )
+  return { cell, homes, hits: placeRows(joinPhotos(near, homes, photos), wave, ra, dec) as IndexRow[] }
 }
 
 export function sampleRows(rows: IndexRow[], max: number): IndexRow[] {
@@ -168,7 +162,7 @@ function tightStart(mids: number[], target: number, lo: number, hi: number): num
 }
 
 const POINTS_KEPT = 32
-const points = new Map<string, { cell: number; hits: IndexRow[] }>()
+const points = new Map<string, { cell: number; homes: number[]; hits: IndexRow[] }>()
 
 function trimPoints(keep: string): void {
   let total = 0
@@ -181,21 +175,19 @@ function trimPoints(keep: string): void {
   }
 }
 
-export async function lookupPoint(indexDir: string, wave: unknown, ra: number, dec: number, f: { band?: string | null; t1?: number | null; t2?: number | null } = {}, cache = tileRows) {
-  const cell = ang2pixNest(5, ra, dec) as number
+export async function lookupPoint(indexDir: string, wave: unknown, ra: number, dec: number, f: Filter = {}, cache = indexRows) {
   const key = `${indexDir}|${ra.toFixed(6)}|${dec.toFixed(6)}`
   let all = points.get(key)
   if (all) {
     points.delete(key)
     points.set(key, all)
   } else {
-    const rows = await cache.load(indexDir, cell)
-    all = { cell, hits: rows ? pointRows(rows, wave, ra, dec) : [] }
+    all = await cellRows(indexDir, wave, ra, dec, cache)
     points.set(key, all)
     trimPoints(key)
   }
   const hits = all.hits.filter((r) => (!f.band || r.band === f.band) && (f.t1 == null || r.mjd >= f.t1) && (f.t2 == null || r.mjd <= f.t2))
-  return { cell, hits }
+  return { cell: all.cell, homes: all.homes, hits }
 }
 
 export interface PointQuery {
@@ -211,6 +203,7 @@ export interface PointQuery {
 
 export interface PointAnswer {
   cell: number
+  homes: number[]
   total: number
   sampled: boolean
   rows: IndexRow[]
@@ -231,9 +224,9 @@ function waveOf(indexDir: string): Promise<unknown> {
 }
 
 export async function answerPoint(q: PointQuery, wave?: unknown): Promise<PointAnswer> {
-  const { cell, hits } = await lookupPoint(q.indexDir, wave ?? (await waveOf(q.indexDir)), q.ra, q.dec, { band: q.band, t1: q.t1, t2: q.t2 })
+  const { cell, homes, hits } = await lookupPoint(q.indexDir, wave ?? (await waveOf(q.indexDir)), q.ra, q.dec, { band: q.band, t1: q.t1, t2: q.t2 })
   const kept = q.max ? sampleRows(hits, q.max) : hits
   const pick = q.pick
   const rows = pick ? kept.map((r) => Object.fromEntries(pick.map((k) => [k, r[k]])) as IndexRow) : kept
-  return { cell, total: hits.length, sampled: kept.length < hits.length, rows }
+  return { cell, homes, total: hits.length, sampled: kept.length < hits.length, rows }
 }

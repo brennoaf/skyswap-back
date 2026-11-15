@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { CHECK_SERVICES, separationDeg, type Checker, type CheckOutcome, type CheckPoint, type CheckResult, type CheckService, type CheckTarget } from './checks.js'
 import { prepared, type DB } from './db.js'
+import type { SkySpot } from './explore.js'
 
 export const FINDING_STATES = ['candidate', 'known', 'likely_artifact', 'package_ready', 'in_review', 'published', 'discarded'] as const
 export type FindingState = (typeof FINDING_STATES)[number]
@@ -54,6 +55,7 @@ export interface FindingDeps {
   card: (cardId: string) => FindingCard | null
   positions: (cardId: string) => { mjd: number; ra: number; dec: number }[]
   marks: (cardId: string) => CrowdMark[]
+  spot: (cardId: string) => SkySpot | null
   dataVersion: string
 }
 
@@ -489,6 +491,7 @@ export class Findings {
       you: !!userId && people.has(userId),
       size_px: card.size_px,
       wcs: card.wcs,
+      spot: this.deps.spot(card.id),
       frames: card.mjds.map((mjd, frame) => {
         const here = marks.filter((m) => m.frame === frame)
         const mine = userId ? here.find((m) => m.user === userId) : undefined

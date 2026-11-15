@@ -67,6 +67,10 @@ export class Deck extends StorePart {
       card: (id) => this.findingCard(id),
       positions: (id) => this.votedPositions(id),
       marks: (id) => this.crowdMarks(id),
+      spot: (id) => {
+        const sky = this.skyCards.get(id)
+        return sky ? skySpot(sky) : null
+      },
       dataVersion: this.kit.manifest?.version ?? 'unknown',
     })
     this.findings.syncAll(this.swapCards.keys())
@@ -590,8 +594,12 @@ export class Deck extends StorePart {
     if (r.changes === 0) throw new HttpError(404, 'no_vote')
   }
 
+  private knownObject(name: string) {
+    return this.kit.objects.find((o) => o.name === name || o.name.startsWith(`${name} `) || o.aliases.includes(name)) ?? null
+  }
+
   private knownName(name: string): string {
-    return this.kit.objects.find((o) => o.name === name || o.name.startsWith(`${name} `) || o.aliases.includes(name))?.name ?? name
+    return this.knownObject(name)?.name ?? name
   }
 
   reveal(card: DeckCard, correct: boolean | null, choice: Choice) {
@@ -607,7 +615,7 @@ export class Deck extends StorePart {
       tile: card.tile,
       size_px: card.size_px,
       frames: card.frames.map((f) => ({ t: f.t, mjd: f.mjd, n_exp: f.n_exp, wl_min: f.wl_min, wl_max: f.wl_max })),
-      known: card.known ? { name: this.knownName(card.known.name), V: card.known.V ?? null, rate_arcsec_h: card.known.rate_arcsec_h ?? null } : null,
+      known: card.known ? { name: this.knownName(card.known.name), object_id: this.knownObject(card.known.name)?.id ?? null, V: card.known.V ?? null, rate_arcsec_h: card.known.rate_arcsec_h ?? null } : null,
       rate_arcsec_h: card.rate_arcsec_h ?? null,
       ra: card.ra,
       dec: card.dec,

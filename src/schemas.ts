@@ -413,6 +413,8 @@ export const PointSpectrum = Type.Object(
     date_end: Nullable(Type.String()),
     bright: Type.Boolean(),
     channels: Type.Array(PointChannel),
+    object: Nullable(Type.Object({ id: Type.String(), name: Type.String(), at: Nullable(Type.String()), shift_arcsec: Type.Number(), solar_system: Type.Boolean() })),
+    elsewhere: Type.Array(Type.Object({ id: Type.String(), name: Type.String(), offset_arcsec: Type.Number() })),
   },
   { $id: 'PointSpectrum' },
 )

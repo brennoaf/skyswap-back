@@ -8,7 +8,8 @@ import { angularSeparationDeg, epochYear, findObjectsByName, propagatePosition, 
 import { parseCoordinates, resolveName } from '../resolve.js'
 import * as S from '../schemas.js'
 import { imagesAt, totalFileBytes } from '../sky.js'
-import { CubeReader } from '../cube.js'
+import { CubeReader, tileFor } from '../cube.js'
+import { midDate, movedAway, objectAt, SOLAR_SYSTEM_KINDS } from '../spectrum-target.js'
 import { DiskCache } from '../disk-cache.js'
 import { lookupPoint, sampleRows } from '../index-lookup.js'
 import { HttpError, postsForObject, type Store } from '../store.js'
@@ -261,16 +262,31 @@ export const contentRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, { 
       schema: {
         tags: ['sky'],
         summary: 'All 102 SPHEREx colours at one sky point, read from the IRSA DR1 all-sky cube (a quick look, not a measurement)',
-        querystring: Type.Object({ ra: Type.Number({ minimum: 0, maximum: 360 }), dec: Type.Number({ minimum: -90, maximum: 90 }) }),
-        response: { 200: S.PointSpectrum, 502: S.ErrorBody, 503: S.ErrorBody },
+        querystring: Type.Object({ ra: Type.Number({ minimum: 0, maximum: 360 }), dec: Type.Number({ minimum: -90, maximum: 90 }), obj: Type.Optional(Type.String({ maxLength: 64 })) }),
+        response: { 200: S.PointSpectrum, 404: S.ErrorBody, 502: S.ErrorBody, 503: S.ErrorBody },
       },
       config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
     },
     async (req, reply) => {
       if (!config.online) return reply.status(503).send({ error: 'offline' })
+      const o = req.query.obj ? kit.objects.find((x) => x.id === req.query.obj) : undefined
+      if (req.query.obj && !o) return reply.status(404).send({ error: 'object_not_found' })
       try {
+        if (o) {
+          let layout = await cube.layout(tileFor(o.ra, o.dec))
+          let at = objectAt(o, midDate(layout.date_beg, layout.date_end))
+          const moved = tileFor(at.ra, at.dec)
+          if (moved !== layout.ipix) {
+            layout = await cube.layout(moved)
+            at = objectAt(o, midDate(layout.date_beg, layout.date_end))
+          }
+          const out = await cube.point(at.ra, at.dec)
+          const object = { id: o.id, name: o.name, at: midDate(out.date_beg, out.date_end), shift_arcsec: at.shift_arcsec, solar_system: SOLAR_SYSTEM_KINDS.includes(o.kind) }
+          return reply.header('cache-control', 'public, max-age=86400').send({ ...out, object, elsewhere: [] })
+        }
         const out = await cube.point(req.query.ra, req.query.dec)
-        return reply.header('cache-control', 'public, max-age=86400').send(out)
+        const elsewhere = movedAway(kit.objects, req.query.ra, req.query.dec, midDate(out.date_beg, out.date_end), out.pixel_arcsec, new Date().toISOString())
+        return reply.header('cache-control', 'public, max-age=86400').send({ ...out, object: null, elsewhere })
       } catch {
         return reply.status(502).send({ error: 'cube_failed' })
       }

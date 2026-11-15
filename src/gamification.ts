@@ -47,14 +47,14 @@ export function previousDay(day: string): string {
 }
 
 export function nextStreak(lastActiveDay: string | null, streak: number, today: string): number {
-  if (lastActiveDay === today) return Math.max(1, streak)
+  if (lastActiveDay && lastActiveDay >= today) return Math.max(1, streak)
   if (lastActiveDay && previousDay(today) === lastActiveDay) return streak + 1
   return 1
 }
 
 export function scoreAction(action: XpAction, state: DayState, opts: { ms?: number; repeat?: boolean } = {}): XpResult {
   const streak = nextStreak(state.lastActiveDay, state.streak, state.day)
-  const firstToday = state.lastActiveDay !== state.day
+  const firstToday = !state.lastActiveDay || state.lastActiveDay < state.day
   const idle = { xp: 0, streakBonus: 0, streak: firstToday ? streak : state.streak }
   if (action === 'vote' && (opts.ms ?? Infinity) < MIN_VOTE_MS) return { ...idle, reason: 'too_fast' }
   if (opts.repeat) return { ...idle, reason: 'repeat' }

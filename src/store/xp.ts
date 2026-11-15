@@ -26,13 +26,14 @@ export class Xp extends StorePart {
   }
 
   private dayState(userId: string): DayState {
-    const day = this.today(userId)
+    const last = this.q("SELECT day, streak FROM xp_events WHERE user_id = ? AND reason NOT IN ('too_fast', 'repeat') ORDER BY id DESC LIMIT 1").get(userId) as { day: string; streak: number } | undefined
+    const local = this.today(userId)
+    const day = last && last.day > local ? last.day : local
     const today = this.q("SELECT action, COUNT(*) AS n, SUM(xp + streak_bonus) AS xp FROM xp_events WHERE user_id = ? AND day = ? AND reason NOT IN ('too_fast', 'repeat') GROUP BY action").all(userId, day) as {
       action: XpAction
       n: number
       xp: number
     }[]
-    const last = this.q("SELECT day, streak FROM xp_events WHERE user_id = ? AND reason NOT IN ('too_fast', 'repeat') ORDER BY id DESC LIMIT 1").get(userId) as { day: string; streak: number } | undefined
     const countsToday: DayState['countsToday'] = {}
     let xpToday = 0
     for (const r of today) {
@@ -44,9 +45,10 @@ export class Xp extends StorePart {
 
   award(userId: string, action: XpAction, ref: string | null, opts: { ms?: number } = {}): XpResult {
     const repeat = ref !== null && action !== 'vote' && !!this.q('SELECT 1 FROM xp_events WHERE user_id = ? AND action = ? AND ref = ? LIMIT 1').get(userId, action, ref)
-    const result = scoreAction(action, this.dayState(userId), { ms: opts.ms, repeat })
+    const state = this.dayState(userId)
+    const result = scoreAction(action, state, { ms: opts.ms, repeat })
     this.q('INSERT INTO xp_events (user_id, action, ref, xp, streak_bonus, streak, reason, day, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(userId, action, ref, result.xp, result.streakBonus, result.streak, result.reason, this.today(userId), this.now())
+      .run(userId, action, ref, result.xp, result.streakBonus, result.streak, result.reason, state.day, this.now())
     if (result.streak >= 7 && !INACTIVE_REASONS.includes(result.reason)) this.grantBadge(userId, 'week_streak')
     return result
   }

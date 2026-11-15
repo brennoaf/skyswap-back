@@ -144,6 +144,10 @@ export class Store {
     return this.deck.rebuildSwap(...args)
   }
 
+  appPost(...args: Parameters<Deck['appItem']>) {
+    return this.deck.appItem(...args)
+  }
+
   appAccountPage(...args: Parameters<Deck['appAccountPage']>) {
     return this.deck.appAccountPage(...args)
   }

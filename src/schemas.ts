@@ -521,6 +521,9 @@ export const FindingSummary = Type.Object(
     credit_names: Type.Array(Type.String()),
     credit_others: Type.Integer(),
     first_vote: Nullable(Type.Object({ nickname: Nullable(Type.String()), at: Type.Number(), note: Nullable(Type.String()) })),
+    finder: Nullable(Type.Object({ name: Type.String(), avatar: Nullable(Type.String()) })),
+    finders: Type.Integer(),
+    thread: Type.Object({ votes: Type.Integer(), my_vote: Type.Integer(), comments: Type.Integer() }),
     social: FindingSocial,
     photo: Nullable(Type.String()),
     photo_cols: Type.Integer(),
@@ -533,7 +536,7 @@ export const FindingSummary = Type.Object(
 const Localized = Type.Object({ pt: Type.String(), en: Type.String() })
 export const AppAccountRef = Type.Object({ handle: Type.String(), name: Type.String(), kind: Type.Literal('app') }, { $id: 'AppAccountRef' })
 export const AppPostItem = Type.Object(
-  { type: Type.Literal('app'), id: Type.String(), account: AppAccountRef, created_at: Type.String(), text: Localized, source: Localized, object: ObjectCard, post: PostDto, social: Type.Object(FindingSocial.properties) },
+  { type: Type.Literal('app'), id: Type.String(), account: AppAccountRef, created_at: Type.String(), text: Localized, source: Localized, object: ObjectCard, post: PostDto, thread: Type.Object({ votes: Type.Integer(), my_vote: Type.Integer(), comments: Type.Integer() }), social: Type.Object(FindingSocial.properties) },
   { $id: 'AppPostItem' },
 )
 export type AppPostItemT = Static<typeof AppPostItem>
@@ -579,6 +582,30 @@ export const FindingPeople = Type.Object(
 )
 
 const DoubtReason = Type.Union([Type.Literal('image_defect'), Type.Literal('known_asteroid'), Type.Literal('variable_star'), Type.Literal('other')])
+
+export const ThreadSummary = Type.Object({ votes: Type.Integer(), my_vote: Type.Integer(), comments: Type.Integer() })
+export const CommentNode = Type.Object(
+  {
+      id: Type.Integer(),
+      parent_id: Nullable(Type.Integer()),
+      depth: Type.Integer(),
+      replies: Type.Integer(),
+      author: Nullable(Type.String()),
+      avatar: Nullable(Type.String()),
+      body: Nullable(Type.String()),
+      created_at: Type.Number(),
+      score: Type.Integer(),
+      my_vote: Type.Integer(),
+      state: Type.Union([Type.Literal('ok'), Type.Literal('deleted'), Type.Literal('hidden')]),
+      mine: Type.Boolean(),
+      reported: Type.Boolean(),
+  },
+  { $id: 'CommentNode' },
+)
+export const Thread = Type.Object({ count: Type.Integer(), comments: Type.Array(CommentNode) }, { $id: 'Thread' })
+export const CommentBody = Type.Object({ body: Type.String({ minLength: 1, maxLength: 4000 }), parent_id: Type.Optional(Nullable(Type.Integer({ minimum: 1 }))) })
+export const TalkVoteBody = Type.Object({ value: Type.Union([Type.Literal(-1), Type.Literal(0), Type.Literal(1)]) })
+export const Finders = Type.Object({ finders: Type.Array(Type.Object({ name: Type.String(), avatar: Nullable(Type.String()), first: Type.Boolean() })), anonymous: Type.Integer() })
 
 export const ReactionBody = Type.Object(
   {

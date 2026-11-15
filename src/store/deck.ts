@@ -97,6 +97,7 @@ export class Deck extends StorePart {
       source: { pt: account.source_pt, en: account.source_en },
       object: objectCard(object),
       post: postDto(post),
+      thread: this.findings.comments.summary(p.id, userId),
       social: this.findings.social(p.id, userId),
     }
   }

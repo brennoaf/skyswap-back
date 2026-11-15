@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { Comments } from './comments.js'
 import { CHECK_SERVICES, separationDeg, type Checker, type CheckOutcome, type CheckPoint, type CheckResult, type CheckService, type CheckTarget } from './checks.js'
 import { prepared, type DB } from './db.js'
 import type { SkySpot } from './explore.js'
@@ -112,11 +113,15 @@ export class Findings {
   onError: (err: unknown, cardId: string) => void = () => undefined
   private running = new Map<string, Promise<void>>()
 
+  readonly comments: Comments
+
   constructor(
     private db: DB,
     private now: () => number,
     private deps: FindingDeps,
-  ) {}
+  ) {
+    this.comments = new Comments(db, now)
+  }
 
   private q(sql: string) {
     return prepared(this.db, sql)
@@ -284,6 +289,29 @@ export class Findings {
     return this.count('SELECT COUNT(*) AS n FROM note_reports WHERE card_id = ?', f.card_id) < NOTE_HIDE_AT
   }
 
+  private avatarOf(nickname: string): string | null {
+    const row = this.q('SELECT a.id FROM avatars a JOIN users u ON u.id = a.owner_id WHERE u.nickname = ?').get(nickname) as { id: string } | undefined
+    return row ? `/kit/avatars/${row.id}.jpg` : null
+  }
+
+  private finder(f: FindingRow, names: string[]): { name: string; avatar: string | null } | null {
+    const first = this.firstVote(f)?.nickname ?? names[0] ?? null
+    return first ? { name: first, avatar: this.avatarOf(first) } : null
+  }
+
+  finders(cardId: string): { finders: { name: string; avatar: string | null; first: boolean }[]; anonymous: number } | null {
+    const f = this.row(cardId)
+    if (!f) return null
+    const credits = this.credits(f)
+    const first = this.finder(f, credits.names)?.name ?? null
+    const names = first ? [first, ...credits.names.filter((n) => n !== first)] : credits.names
+    return { finders: names.map((name) => ({ name, avatar: this.avatarOf(name), first: name === first })), anonymous: credits.anonymous }
+  }
+
+  isTarget(id: string): boolean {
+    return this.isAppPost(id) || !!this.row(id)
+  }
+
   private firstVote(f: FindingRow): { nickname: string | null; at: number; note: string | null } | null {
     const r = this.firstRow(f)
     return r ? { nickname: r.credit_visible ? r.nickname : null, at: r.created_at, note: this.noteShown(f, r) ? r.note : null } : null
@@ -404,7 +432,11 @@ export class Findings {
          ) a JOIN findings f ON f.card_id = a.card_id`,
       )
       .all({ since }) as { card_id: string; user_id: string; created_at: number; weight: number; state: FindingState }[]
-    const rows = [...found, ...this.appReactions(since)]
+    const talk = this.comments.activity(since).flatMap((a) => {
+      const state = this.isAppPost(a.target) ? ('known' as FindingState) : this.row(a.target)?.state
+      return state ? [{ card_id: a.target, user_id: a.user_id, created_at: a.created_at, weight: a.weight, state }] : []
+    })
+    const rows = [...found, ...this.appReactions(since), ...talk]
     const states = new Map<string, FindingState>()
     const best = new Map<string, Map<string, number>>()
     for (const r of rows) {
@@ -425,7 +457,8 @@ export class Findings {
   }
 
   hasPopular(): boolean {
-    if (this.appReactions(this.now() - POPULAR_WINDOW_MS).length) return true
+    const since = this.now() - POPULAR_WINDOW_MS
+    if (this.appReactions(since).length || this.comments.activity(since).length) return true
     return !!this.q(
       `SELECT 1 FROM findings f WHERE EXISTS (SELECT 1 FROM second_looks s WHERE s.card_id = f.card_id AND s.created_at >= @since)
          OR EXISTS (SELECT 1 FROM reactions r WHERE r.card_id = f.card_id AND r.created_at >= @since) LIMIT 1`,
@@ -471,6 +504,9 @@ export class Findings {
       credit_names: credits.names.slice(0, 2),
       credit_others: Math.max(0, credits.names.length - 2) + credits.anonymous,
       first_vote: this.firstVote(f),
+      finder: this.finder(f, credits.names),
+      finders: credits.names.length + credits.anonymous,
+      thread: this.comments.summary(f.card_id, userId),
       social: this.social(f.card_id, userId),
       photo: card.sprite ?? (this.deps.hasThumb(card.id) ? `/api/community/findings/${encodeURIComponent(card.id)}/photo` : null),
       photo_cols: card.sprite ? card.mjds.length : 1,
@@ -621,6 +657,7 @@ export class Findings {
         this.q('DELETE FROM reactions WHERE card_id = ?').run(id)
         this.q('DELETE FROM second_looks WHERE card_id = ?').run(id)
         this.q('DELETE FROM finding_follows WHERE card_id = ?').run(id)
+        this.comments.clear(id)
         this.q('DELETE FROM findings WHERE card_id = ?').run(id)
       }
     })()

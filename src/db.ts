@@ -274,6 +274,38 @@ export const MIGRATIONS: string[] = [
      user_id TEXT,
      expires_at INTEGER NOT NULL
    );`,
+  `CREATE TABLE comments (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     target TEXT NOT NULL,
+     parent_id INTEGER REFERENCES comments(id),
+     user_id TEXT NOT NULL REFERENCES users(id),
+     body TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     deleted INTEGER NOT NULL DEFAULT 0
+   );
+   CREATE INDEX comments_target ON comments (target, created_at);
+   CREATE INDEX comments_user ON comments (user_id, created_at);
+   CREATE TABLE comment_votes (
+     comment_id INTEGER NOT NULL REFERENCES comments(id),
+     user_id TEXT NOT NULL REFERENCES users(id),
+     value INTEGER NOT NULL CHECK (value IN (-1, 1)),
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (comment_id, user_id)
+   );
+   CREATE TABLE comment_reports (
+     comment_id INTEGER NOT NULL REFERENCES comments(id),
+     user_id TEXT NOT NULL REFERENCES users(id),
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (comment_id, user_id)
+   );
+   CREATE TABLE post_votes (
+     target TEXT NOT NULL,
+     user_id TEXT NOT NULL REFERENCES users(id),
+     value INTEGER NOT NULL CHECK (value IN (-1, 1)),
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (target, user_id)
+   );
+   CREATE INDEX post_votes_time ON post_votes (created_at);`,
 ]
 
 const statements = new WeakMap<DB, Map<string, Database.Statement>>()

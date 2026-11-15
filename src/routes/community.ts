@@ -16,6 +16,99 @@ export const communityRoutes: FastifyPluginAsyncTypebox<RouteCtx> = async (app, 
     },
   )
 
+  const ThreadParams = Type.Object({ id: Type.String({ maxLength: 120 }) })
+  const CommentParams = Type.Object({ cid: Type.Integer({ minimum: 1 }) })
+  const ADD_ERRORS = { empty: 400, too_long: 400, bad_parent: 400, too_deep: 400, too_many: 429 } as const
+
+  app.get(
+    '/api/community/threads/:id',
+    { schema: { tags: ['community'], params: ThreadParams, querystring: Type.Object({ sort: Type.Optional(Type.Union([Type.Literal('best'), Type.Literal('new')])) }), response: { 200: S.Thread, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      if (!store.findings.isTarget(req.params.id)) return reply.status(404).send({ error: 'unknown_post' })
+      if (req.user && !store.findings.isAppPost(req.params.id)) store.findings.expose(req.user.id, [req.params.id], 'link')
+      return store.findings.comments.thread(req.params.id, req.user?.id ?? null, req.query.sort ?? 'best')
+    },
+  )
+
+  app.post(
+    '/api/community/threads/:id/comments',
+    { config: writeLimit, schema: { tags: ['community'], params: ThreadParams, body: S.CommentBody, response: { 200: Type.Object({ id: Type.Integer() }), 400: S.ErrorBody, 401: S.ErrorBody, 404: S.ErrorBody, 429: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      if (!store.findings.isTarget(req.params.id)) return reply.status(404).send({ error: 'unknown_post' })
+      const res = store.findings.comments.add(req.params.id, user.id, req.body.body, req.body.parent_id ?? null)
+      if ('error' in res) return reply.status(ADD_ERRORS[res.error]).send({ error: res.error })
+      return res
+    },
+  )
+
+  app.post(
+    '/api/community/threads/:id/vote',
+    { config: writeLimit, schema: { tags: ['community'], params: ThreadParams, body: S.TalkVoteBody, response: { 200: S.ThreadSummary, 401: S.ErrorBody, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      if (!store.findings.isTarget(req.params.id)) return reply.status(404).send({ error: 'unknown_post' })
+      store.findings.comments.votePost(req.params.id, user.id, req.body.value)
+      return store.findings.comments.summary(req.params.id, user.id)
+    },
+  )
+
+  app.post(
+    '/api/community/comments/:cid/vote',
+    { config: writeLimit, schema: { tags: ['community'], params: CommentParams, body: S.TalkVoteBody, response: { 200: Type.Object({ ok: Type.Boolean() }), 400: S.ErrorBody, 401: S.ErrorBody, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      const c = store.findings.comments.targetOf(req.params.cid)
+      if (!c || c.deleted) return reply.status(404).send({ error: 'unknown_comment' })
+      if (c.user_id === user.id) return reply.status(400).send({ error: 'own_comment' })
+      store.findings.comments.vote(req.params.cid, user.id, req.body.value)
+      return { ok: true }
+    },
+  )
+
+  app.post(
+    '/api/community/comments/:cid/report',
+    { config: writeLimit, schema: { tags: ['community'], params: CommentParams, response: { 200: Type.Object({ ok: Type.Boolean() }), 400: S.ErrorBody, 401: S.ErrorBody, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      const c = store.findings.comments.targetOf(req.params.cid)
+      if (!c || c.deleted) return reply.status(404).send({ error: 'unknown_comment' })
+      if (c.user_id === user.id) return reply.status(400).send({ error: 'own_comment' })
+      store.findings.comments.report(req.params.cid, user.id)
+      return { ok: true }
+    },
+  )
+
+  app.delete(
+    '/api/community/comments/:cid',
+    { config: writeLimit, schema: { tags: ['community'], params: CommentParams, response: { 200: Type.Object({ ok: Type.Boolean() }), 401: S.ErrorBody, 403: S.ErrorBody, 404: S.ErrorBody } } },
+    async (req, reply) => {
+      const user = requireUser(req, reply)
+      if (!user) return reply
+      const c = store.findings.comments.targetOf(req.params.cid)
+      if (!c || c.deleted) return reply.status(404).send({ error: 'unknown_comment' })
+      if (c.user_id !== user.id) return reply.status(403).send({ error: 'not_yours' })
+      store.findings.comments.remove(req.params.cid)
+      return { ok: true }
+    },
+  )
+
+  app.get(
+    '/api/community/findings/:id/finders',
+    { schema: { tags: ['community'], params: ThreadParams, response: { 200: S.Finders, 404: S.ErrorBody } } },
+    async (req, reply) => store.findings.finders(req.params.id) ?? reply.status(404).send({ error: 'unknown_finding' }),
+  )
+
+  app.get(
+    '/api/community/posts/:id',
+    { schema: { tags: ['community'], params: ThreadParams, response: { 200: S.AppPostItem, 404: S.ErrorBody } } },
+    async (req, reply) => store.appPost(req.params.id, req.user?.id ?? null) ?? reply.status(404).send({ error: 'unknown_post' }),
+  )
+
   app.get(
     '/api/accounts/:handle',
     { schema: { tags: ['community'], params: Type.Object({ handle: Type.String({ maxLength: 40 }) }), response: { 200: S.AccountPage, 404: S.ErrorBody } } },

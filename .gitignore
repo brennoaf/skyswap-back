@@ -10,3 +10,4 @@ docs/
 *.md
 *.test.*
 *.spec.*
+!README.md
